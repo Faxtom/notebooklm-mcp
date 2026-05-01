@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-01
+
 ### Added
 - Flow animation GIF in README
 - Sponsor links: Buy Me a Coffee and Ko-fi (`.github/FUNDING.yml` + README badges)
 - `/cleanup-branches` skill for post-merge branch cleanup
 - `/sync-docs` skill to keep CLAUDE.md and CHANGELOG.md in sync
+- Unit tests for `_launch_chrome` covering Windows multi-process launcher behavior
+
+### Fixed
+- Windows Chrome login crash: launcher process exits with code 0 immediately
+  while the browser runs as a detached child. `_launch_chrome` now treats a
+  code-0 exit as success when CDP is reachable, so login no longer fails on
+  Windows (#19, thanks @WillWetzel)
 
 ## [0.2.0] - 2026-02-15
 
