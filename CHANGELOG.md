@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-17
+
+### Fixed
+- Cross-platform auth tests for Linux CI matrix (Helium paths, Playwright Chromium detection)
+
 ## [0.3.0] - 2026-06-17
 
 Fork by [@Faxtom](https://github.com/Faxtom) — based on [julianoczkowski/notebooklm-mcp-2026](https://github.com/julianoczkowski/notebooklm-mcp-2026).
