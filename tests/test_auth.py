@@ -176,12 +176,14 @@ class TestHeliumSupport:
     def test_user_data_dir_windows(self):
         from notebooklm_mcp_2026.auth import helium_user_data_dir
 
+        localappdata = r"C:\Users\Test\AppData\Local"
         with (
-            patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\Test\AppData\Local"}),
+            patch.dict(os.environ, {"LOCALAPPDATA": localappdata}),
             patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"),
         ):
             path = helium_user_data_dir()
-        assert path == Path(r"C:\Users\Test\AppData\Local\imput\Helium\User Data")
+        # Build expected the same way as auth.py so the test is portable on Linux CI.
+        assert path == Path(localappdata) / "imput" / "Helium" / "User Data"
 
     def test_user_data_dir_macos(self):
         from notebooklm_mcp_2026.auth import helium_user_data_dir
@@ -257,15 +259,20 @@ class TestBrowserSupport:
         with pytest.raises(ValueError, match="Unknown browser"):
             _normalize_browser_name("internet-explorer")
 
-    def test_chromium_detected_on_windows_playwright(self):
+    def test_chromium_detected_on_windows_playwright(self, tmp_path):
         from notebooklm_mcp_2026.auth import get_browser_executable
 
+        chrome_dir = tmp_path / "ms-playwright" / "chromium-1200" / "chrome-win64"
+        chrome_dir.mkdir(parents=True)
+        exe = chrome_dir / "chrome.exe"
+        exe.write_text("")
+
         with (
+            patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}),
             patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"),
-            patch.object(Path, "exists", return_value=True),
         ):
             path = get_browser_executable("chromium")
-        assert path is not None
+        assert path == str(exe)
 
     @patch("notebooklm_mcp_2026.auth._load_cookies_with_browser_cookie3")
     @patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies")
