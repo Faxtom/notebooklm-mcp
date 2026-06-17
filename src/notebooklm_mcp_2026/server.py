@@ -63,7 +63,7 @@ mcp = FastMCP(
     instructions=(
         "NotebookLM MCP Server — query Google NotebookLM notebooks for context.\n\n"
         "If you get authentication errors, ask the user to run "
-        "'notebooklm-mcp-2026 login' in their terminal.\n\n"
+        "'notebooklm-mcp-2026 login' in their terminal (auto-imports from Chrome).\n\n"
         "Typical workflow:\n"
         "1. list_notebooks — find the notebook ID\n"
         "2. list_sources — see what sources are in it\n"

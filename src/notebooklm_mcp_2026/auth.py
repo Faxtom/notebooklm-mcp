@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import os
 import logging
 import platform
 import re
@@ -32,6 +33,7 @@ from .config import (
     REQUIRED_COOKIES,
     STORAGE_DIR,
 )
+from . import config
 
 logger = logging.getLogger("notebooklm_mcp_2026.auth")
 
@@ -111,27 +113,503 @@ def validate_cookies(cookies: dict[str, str]) -> bool:
     return REQUIRED_COOKIES.issubset(cookies.keys())
 
 
+def filter_essential_cookies(cookies: dict[str, str]) -> dict[str, str]:
+    """Keep only the Google cookies needed for NotebookLM API calls."""
+    return {name: value for name, value in cookies.items() if name in ESSENTIAL_COOKIES}
+
+
+def build_tokens_from_cookies(cookies: dict[str, str]) -> AuthTokens:
+    """Build auth tokens from cookie dict, fetching CSRF + session ID over HTTP."""
+    import httpx
+
+    from .config import BASE_URL, PAGE_FETCH_HEADERS
+
+    filtered = filter_essential_cookies(cookies)
+    if not validate_cookies(filtered):
+        missing = REQUIRED_COOKIES - filtered.keys()
+        raise RuntimeError(
+            f"Missing required Google cookies: {', '.join(sorted(missing))}. "
+            "Log in to https://notebooklm.google.com in your browser first."
+        )
+
+    jar = httpx.Cookies()
+    for name, value in filtered.items():
+        jar.set(name, value, domain=".google.com")
+
+    with httpx.Client(
+        cookies=jar,
+        headers=PAGE_FETCH_HEADERS,
+        follow_redirects=True,
+        timeout=15.0,
+    ) as client:
+        resp = client.get(f"{BASE_URL}/")
+        if "accounts.google.com" in str(resp.url):
+            raise RuntimeError(
+                "Google session expired in browser. "
+                "Open https://notebooklm.google.com in your browser and log in again."
+            )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Failed to reach NotebookLM: HTTP {resp.status_code}")
+
+        html = resp.text
+        csrf_token = extract_csrf_from_html(html)
+        session_id = extract_session_id_from_html(html)
+        if not csrf_token:
+            raise RuntimeError("Could not extract CSRF token from NotebookLM page.")
+
+    return AuthTokens(
+        cookies=filtered,
+        csrf_token=csrf_token,
+        session_id=session_id,
+        extracted_at=time.time(),
+    )
+
+
 # ---------------------------------------------------------------------------
-# Chrome discovery
+# Alternative auth — import from system browser or file (no CDP window)
 # ---------------------------------------------------------------------------
+
+_last_silent_refresh: float = 0.0
+
+
+def helium_user_data_dir() -> Path:
+    """Default Helium profile directory (https://github.com/imputnet/helium)."""
+    system = platform.system()
+    if system == "Windows":
+        return Path(os.environ.get("LOCALAPPDATA", "")) / "imput" / "Helium" / "User Data"
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "net.imput.helium"
+    return Path.home() / ".config" / "helium"
+
+
+def helium_cookie_db_paths() -> tuple[Path, Path] | None:
+    """Return ``(cookies_db, local_state)`` for Helium's default profile."""
+    user_data = helium_user_data_dir()
+    if not user_data.is_dir():
+        return None
+
+    key_file = user_data / "Local State"
+    if not key_file.is_file():
+        return None
+
+    default_profile = user_data / "Default"
+    for cookie_file in (
+        default_profile / "Network" / "Cookies",
+        default_profile / "Cookies",
+    ):
+        if cookie_file.is_file():
+            return cookie_file, key_file
+
+    for profile_dir in sorted(user_data.glob("Profile *")):
+        for rel in ("Network/Cookies", "Cookies"):
+            cookie_file = profile_dir / rel
+            if cookie_file.is_file():
+                return cookie_file, key_file
+
+    return None
+
+
+def _helium_executable_candidates() -> list[Path]:
+    """Helium installs chrome.exe under %LOCALAPPDATA%\\imput\\Helium\\Application."""
+    system = platform.system()
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+
+    if system == "Darwin":
+        return [Path("/Applications/Helium.app/Contents/MacOS/Helium")]
+
+    if system == "Linux":
+        return []
+
+    app_dir = local / "imput" / "Helium" / "Application"
+    candidates: list[Path] = []
+    root_exe = app_dir / "chrome.exe"
+    if root_exe.is_file():
+        candidates.append(root_exe)
+    if app_dir.is_dir():
+        candidates.extend(sorted(app_dir.glob("*/chrome.exe"), reverse=True))
+    return candidates
+
+
+def _load_helium_cookies() -> dict[str, str]:
+    """Import Google cookies from Helium's Chromium profile."""
+    import browser_cookie3
+
+    paths = helium_cookie_db_paths()
+    if paths is None:
+        raise RuntimeError(
+            "Helium profile not found. Install Helium from https://github.com/imputnet/helium, "
+            "log in to https://notebooklm.google.com, then close Helium and retry."
+        )
+
+    cookie_file, key_file = paths
+    try:
+        jar = browser_cookie3.chrome(
+            cookie_file=str(cookie_file),
+            domain_name=".google.com",
+            key_file=str(key_file),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not read Helium cookies. Close Helium completely and try again, "
+            f"or use: notebooklm-mcp-2026 login --method cdp --browser helium\n({exc})"
+        ) from exc
+
+    cookies: dict[str, str] = {}
+    for cookie in jar:
+        cookie_name = getattr(cookie, "name", "")
+        if cookie_name in ESSENTIAL_COOKIES:
+            cookies[cookie_name] = getattr(cookie, "value", "")
+    return cookies
+
+
+def _load_cookies_with_browser_cookie3(browser: str) -> dict[str, str]:
+    """Load Google cookies from a specific browser profile via browser_cookie3."""
+    try:
+        import browser_cookie3
+    except ImportError as exc:
+        raise RuntimeError(
+            "browser-cookie3 is not installed. Run: pip install browser-cookie3"
+        ) from exc
+
+    name = _normalize_browser_name(browser)
+    if name == "helium":
+        return _load_helium_cookies()
+
+    loader_name = BROWSER_META[name]["cookie3"]
+    loader = getattr(browser_cookie3, loader_name, None)
+    if loader is None:
+        raise RuntimeError(f"browser-cookie3 does not support {BROWSER_META[name]['label']}.")
+
+    label = BROWSER_META[name]["label"]
+    try:
+        jar = loader(domain_name=".google.com")
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not read {label} cookies. Close the browser completely and try again "
+            f"or use --method cdp with a Chromium browser.\n({exc})"
+        ) from exc
+
+    cookies: dict[str, str] = {}
+    for cookie in jar:
+        cookie_name = getattr(cookie, "name", "")
+        if cookie_name in ESSENTIAL_COOKIES:
+            cookies[cookie_name] = getattr(cookie, "value", "")
+    return cookies
+
+
+def _browser_import_order(browser: str | None) -> list[str]:
+    """Resolve which browsers to try for cookie import."""
+    if browser is not None:
+        return [_normalize_browser_name(browser)]
+
+    preferred = os.environ.get("NOTEBOOKLM_BROWSER", "").strip().lower()
+    order: list[str] = []
+    if preferred and preferred in BROWSER_META:
+        order.append(preferred)
+    for name in BROWSER_ORDER:
+        if name == "safari" and platform.system() != "Darwin":
+            continue
+        if name not in order:
+            order.append(name)
+    return order
+
+
+def extract_cookies_from_browser(browser: str | None = None) -> AuthTokens:
+    """Import Google cookies from an installed browser profile.
+
+    Tries *browser* if given, otherwise every supported browser in order.
+    Most browsers must be **closed** on Windows while cookies are read.
+    """
+    errors: list[str] = []
+    for name in _browser_import_order(browser):
+        try:
+            cookies = _load_cookies_with_browser_cookie3(name)
+            tokens = build_tokens_from_cookies(cookies)
+            logger.info("Imported cookies from %s.", BROWSER_META[name]["label"])
+            return tokens
+        except Exception as exc:
+            errors.append(f"{BROWSER_META[name]['label']}: {exc}")
+            logger.debug("Cookie import failed for %s: %s", name, exc)
+
+    if browser is not None:
+        raise RuntimeError(errors[-1] if errors else f"Could not import from {browser}.")
+
+    summary = "; ".join(errors[:3])
+    if len(errors) > 3:
+        summary += f"; …and {len(errors) - 3} more"
+    raise RuntimeError(
+        "Could not import cookies from any supported browser. "
+        "Log in to notebooklm.google.com, close your browser, and retry — "
+        f"or use --method cdp.\n{summary}"
+    )
+
+
+def import_cookies_from_file(path: Path) -> AuthTokens:
+    """Import cookies from a JSON file.
+
+    Supported formats:
+    - ``{"SID": "...", "HSID": "..."}``
+    - ``{"cookies": {"SID": "..."}}``
+    - ``[{"name": "SID", "value": "..."}, ...]`` (Chrome DevTools export)
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Invalid cookie file: {exc}") from exc
+
+    cookies: dict[str, str] = {}
+
+    if isinstance(data, dict):
+        if "cookies" in data and isinstance(data["cookies"], dict):
+            cookies = {str(k): str(v) for k, v in data["cookies"].items()}
+        else:
+            cookies = {str(k): str(v) for k, v in data.items() if not k.startswith("_")}
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                value = item.get("value", "")
+                if name and value:
+                    cookies[str(name)] = str(value)
+
+    if not cookies:
+        raise RuntimeError("No cookies found in file.")
+
+    return build_tokens_from_cookies(cookies)
+
+
+def try_silent_token_refresh(*, force: bool = False) -> AuthTokens | None:
+    """Try to refresh stored tokens without user interaction.
+
+    Attempts, in order:
+    1. Import cookies from installed browsers (Chrome, Edge, Firefox, …).
+    2. Re-extract from the isolated Chromium profile used by prior CDP logins.
+
+    Returns ``None`` if all methods fail or cooldown has not elapsed.
+    """
+    global _last_silent_refresh
+
+    if not force:
+        elapsed = time.time() - _last_silent_refresh
+        if elapsed < config.AUTH_SILENT_REFRESH_COOLDOWN:
+            return None
+
+    _last_silent_refresh = time.time()
+
+    # 1. Installed browser profiles
+    try:
+        tokens = extract_cookies_from_browser()
+        save_tokens(tokens)
+        logger.info("Silently refreshed tokens from system browser profile.")
+        return tokens
+    except Exception as exc:
+        logger.debug("Browser cookie import failed: %s", exc)
+
+    # 2. Persistent isolated profile (headless CDP, no login prompt)
+    try:
+        tokens = extract_cookies_via_cdp(
+            login_timeout=30,
+            interactive=False,
+            headless=True,
+        )
+        save_tokens(tokens)
+        logger.info("Silently refreshed tokens from persistent Chrome profile.")
+        return tokens
+    except Exception as exc:
+        logger.debug("Profile CDP refresh failed: %s", exc)
+
+    return None
+
+
+# Browsers supported for cookie import (browser_cookie3) and/or CDP login (Chromium-based)
+BROWSER_ORDER = (
+    "helium",
+    "chrome",
+    "edge",
+    "brave",
+    "chromium",
+    "opera",
+    "vivaldi",
+    "firefox",
+    "librewolf",
+    "safari",
+)
+
+# cookie3 loader name (or "helium" for custom) → supports CDP interactive login
+BROWSER_META: dict[str, dict[str, Any]] = {
+    "helium": {"label": "Helium", "cookie3": "helium", "cdp": True},
+    "chrome": {"label": "Google Chrome", "cookie3": "chrome", "cdp": True},
+    "edge": {"label": "Microsoft Edge", "cookie3": "edge", "cdp": True},
+    "brave": {"label": "Brave", "cookie3": "brave", "cdp": True},
+    "chromium": {"label": "Chromium", "cookie3": "chromium", "cdp": True},
+    "opera": {"label": "Opera", "cookie3": "opera", "cdp": True},
+    "vivaldi": {"label": "Vivaldi", "cookie3": "vivaldi", "cdp": True},
+    "firefox": {"label": "Firefox", "cookie3": "firefox", "cdp": False},
+    "librewolf": {"label": "LibreWolf", "cookie3": "librewolf", "cdp": False},
+    "safari": {"label": "Safari", "cookie3": "safari", "cdp": False},
+}
+
+
+def _normalize_browser_name(browser: str) -> str:
+    name = browser.strip().lower()
+    if name not in BROWSER_META:
+        supported = ", ".join(BROWSER_ORDER)
+        raise ValueError(f"Unknown browser '{browser}'. Supported: {supported}, auto")
+    return name
+
+
+def _browser_executable_candidates(browser: str) -> list[Path]:
+    """Return platform-specific executable paths to probe for *browser*."""
+    system = platform.system()
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+
+    if browser == "helium":
+        if system == "Darwin":
+            return _helium_executable_candidates()
+        if system == "Linux":
+            return []
+        return _helium_executable_candidates()
+
+    if browser == "chrome":
+        if system == "Darwin":
+            return [Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")]
+        if system == "Linux":
+            return []  # resolved via shutil.which below
+        return [
+            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+            Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+            local / "Google" / "Chrome" / "Application" / "chrome.exe",
+        ]
+
+    if browser == "edge":
+        if system == "Darwin":
+            return [Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")]
+        if system == "Linux":
+            return []
+        return [
+            Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+            local / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        ]
+
+    if browser == "brave":
+        if system == "Darwin":
+            return [Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")]
+        if system == "Linux":
+            return []
+        return [
+            Path(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+            local / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe",
+        ]
+
+    if browser == "opera":
+        if system == "Darwin":
+            return [Path("/Applications/Opera.app/Contents/MacOS/Opera")]
+        if system == "Linux":
+            return []
+        return [
+            local / "Programs" / "Opera" / "opera.exe",
+            Path(r"C:\Program Files\Opera\opera.exe"),
+        ]
+
+    if browser == "vivaldi":
+        if system == "Darwin":
+            return [Path("/Applications/Vivaldi.app/Contents/MacOS/Vivaldi")]
+        if system == "Linux":
+            return []
+        return [local / "Vivaldi" / "Application" / "vivaldi.exe"]
+
+    if browser == "chromium":
+        if system == "Darwin":
+            return [Path("/Applications/Chromium.app/Contents/MacOS/Chromium")]
+        if system == "Linux":
+            return []
+        playwright_root = local / "ms-playwright"
+        if playwright_root.is_dir():
+            return sorted(
+                playwright_root.glob("chromium-*/chrome-win64/chrome.exe"),
+                reverse=True,
+            )
+        return []
+
+    if browser == "firefox":
+        if system == "Darwin":
+            return [Path("/Applications/Firefox.app/Contents/MacOS/firefox")]
+        if system == "Linux":
+            return []
+        return [
+            Path(r"C:\Program Files\Mozilla Firefox\firefox.exe"),
+            local / "Mozilla Firefox" / "firefox.exe",
+        ]
+
+    return []
+
+
+def _linux_which_names(browser: str) -> tuple[str, ...]:
+    return {
+        "helium": ("helium", "helium-browser"),
+        "chrome": ("google-chrome", "google-chrome-stable", "chrome"),
+        "chromium": ("chromium", "chromium-browser"),
+        "edge": ("microsoft-edge", "microsoft-edge-stable"),
+        "brave": ("brave", "brave-browser"),
+        "opera": ("opera",),
+        "vivaldi": ("vivaldi", "vivaldi-stable"),
+        "firefox": ("firefox",),
+        "librewolf": ("librewolf",),
+    }.get(browser, ())
+
+
+def get_browser_executable(browser: str) -> str | None:
+    """Return the executable path for *browser*, or ``None`` if not found."""
+    name = _normalize_browser_name(browser)
+
+    if platform.system() == "Linux":
+        for candidate in _linux_which_names(name):
+            found = shutil.which(candidate)
+            if found:
+                return found
+
+    for path in _browser_executable_candidates(name):
+        if path.exists():
+            return str(path)
+
+    return None
+
+
+def list_detected_browsers() -> list[str]:
+    """Return browser slugs that appear installed on this system."""
+    detected: list[str] = []
+    for name in BROWSER_ORDER:
+        if name == "safari" and platform.system() != "Darwin":
+            continue
+        if get_browser_executable(name) is not None:
+            detected.append(name)
+    return detected
+
+
+def get_cdp_browser_executable(browser: str | None = None) -> str | None:
+    """Return a Chromium-based browser executable suitable for CDP login."""
+    if browser is not None:
+        name = _normalize_browser_name(browser)
+        if not BROWSER_META[name]["cdp"]:
+            raise ValueError(
+                f"{BROWSER_META[name]['label']} does not support CDP login. "
+                "Use --method browser to import cookies, or a Chromium-based browser."
+            )
+        return get_browser_executable(name)
+
+    for name in BROWSER_ORDER:
+        if not BROWSER_META[name]["cdp"]:
+            continue
+        path = get_browser_executable(name)
+        if path:
+            return path
+    return None
 
 
 def get_chrome_path() -> str | None:
-    """Return the Chrome executable path for the current platform."""
-    system = platform.system()
-    if system == "Darwin":
-        path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-        return path if Path(path).exists() else None
-    elif system == "Linux":
-        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
-            found = shutil.which(name)
-            if found:
-                return found
-        return None
-    elif system == "Windows":
-        path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-        return path if Path(path).exists() else None
-    return None
+    """Return a Chromium-based browser path (backward-compatible alias)."""
+    return get_cdp_browser_executable()
 
 
 def _find_available_port() -> int:
@@ -192,17 +670,20 @@ def _remove_stale_locks(profile_dir: Path) -> None:
             pass
 
 
-def _get_chrome_launch_args(port: int) -> list[str]:
+def _get_chrome_launch_args(port: int, *, headless: bool = False) -> list[str]:
     """Return Chrome CLI arguments for CDP login (without the executable)."""
-    return [
+    args = [
         f"--remote-debugging-port={port}",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-extensions",
         f"--user-data-dir={CHROME_PROFILE_DIR}",
         "--remote-allow-origins=*",
-        NOTEBOOKLM_URL,
     ]
+    if headless:
+        args.append("--headless=new")
+    args.append(NOTEBOOKLM_URL)
+    return args
 
 
 def _wait_for_cdp_connection(port: int, timeout: int) -> None:
@@ -218,20 +699,27 @@ def _wait_for_cdp_connection(port: int, timeout: int) -> None:
     )
 
 
-def _launch_chrome(port: int, chrome_path: str | None = None) -> subprocess.Popen:
-    """Launch Chrome with remote debugging. Never uses ``shell=True``."""
+def _launch_chromium(
+    port: int,
+    browser_path: str | None = None,
+    *,
+    chrome_path: str | None = None,
+    headless: bool = False,
+) -> subprocess.Popen:
+    """Launch a Chromium-based browser with remote debugging. Never uses ``shell=True``."""
     global _chrome_process
 
-    resolved = chrome_path or get_chrome_path()
+    resolved = browser_path or chrome_path or get_cdp_browser_executable()
     if not resolved:
         raise RuntimeError(
-            "Google Chrome not found. Install Chrome or use --chrome-path."
+            "No Chromium-based browser found (Chrome, Edge, Brave, Chromium, …). "
+            "Install one or pass --browser-path."
         )
 
     CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     _remove_stale_locks(CHROME_PROFILE_DIR)
 
-    args = [resolved] + _get_chrome_launch_args(port)
+    args = [resolved] + _get_chrome_launch_args(port, headless=headless)
 
     process = subprocess.Popen(
         args,
@@ -272,6 +760,10 @@ def _launch_chrome(port: int, chrome_path: str | None = None) -> subprocess.Pope
             )
 
     return process
+
+
+# Backward-compatible alias used in tests
+_launch_chrome = _launch_chromium
 
 
 # ---------------------------------------------------------------------------
@@ -381,11 +873,52 @@ def extract_session_id_from_html(html: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _extract_cookies_from_ws(ws_url: str) -> dict[str, str]:
+    """Read essential Google cookies from a CDP page."""
+    raw = _get_page_cookies(ws_url)
+    cookies: dict[str, str] = {}
+    for c in raw:
+        name = c.get("name", "")
+        domain = c.get("domain", "")
+        if name in ESSENTIAL_COOKIES and ".google.com" in domain:
+            cookies[name] = c.get("value", "")
+    return cookies
+
+
+def _extract_tokens_from_cdp_page(ws_url: str) -> AuthTokens:
+    """Extract cookies, CSRF, and session ID from an open CDP page."""
+    cookies = _extract_cookies_from_ws(ws_url)
+    if not validate_cookies(cookies):
+        missing = REQUIRED_COOKIES - cookies.keys()
+        raise RuntimeError(f"Missing cookies: {', '.join(sorted(missing))}")
+
+    try:
+        current_url = _get_current_url(ws_url)
+        if "notebooklm.google.com" not in current_url:
+            _navigate_to_url(ws_url, NOTEBOOKLM_URL)
+            time.sleep(2)
+    except Exception:
+        pass
+
+    html = _get_page_html(ws_url)
+    return AuthTokens(
+        cookies=cookies,
+        csrf_token=extract_csrf_from_html(html),
+        session_id=extract_session_id_from_html(html),
+        extracted_at=time.time(),
+    )
+
+
 def extract_cookies_via_cdp(
     port: int | None = None,
     login_timeout: int = 300,
     chrome_path: str | None = None,
+    browser_path: str | None = None,
+    browser: str | None = None,
     on_manual_launch_needed: Callable[[int, list[str]], None] | None = None,
+    *,
+    interactive: bool = True,
+    headless: bool = False,
 ) -> AuthTokens:
     """Launch Chrome, wait for the user to log in, and extract auth tokens.
 
@@ -420,16 +953,28 @@ def extract_cookies_via_cdp(
         port = _find_available_port()
 
     chrome_proc: subprocess.Popen | None = None
-    resolved = chrome_path or get_chrome_path()
+    explicit_path = browser_path or chrome_path
+    if explicit_path:
+        resolved = explicit_path
+    elif browser is not None:
+        name = _normalize_browser_name(browser)
+        if not BROWSER_META[name]["cdp"]:
+            raise RuntimeError(
+                f"{BROWSER_META[name]['label']} does not support CDP login. "
+                "Use --method browser instead."
+            )
+        resolved = get_browser_executable(name)
+    else:
+        resolved = get_cdp_browser_executable()
 
     try:
         if resolved:
-            chrome_proc = _launch_chrome(port, resolved)
+            chrome_proc = _launch_chromium(port, resolved, headless=headless)
         elif on_manual_launch_needed:
             # Chrome not found — let the caller show manual instructions
             CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
             _remove_stale_locks(CHROME_PROFILE_DIR)
-            on_manual_launch_needed(port, _get_chrome_launch_args(port))
+            on_manual_launch_needed(port, _get_chrome_launch_args(port, headless=headless))
             _wait_for_cdp_connection(port, login_timeout)
         else:
             raise RuntimeError(
@@ -445,60 +990,36 @@ def extract_cookies_via_cdp(
         if not ws_url:
             raise RuntimeError("No WebSocket URL for Chrome page — try restarting Chrome.")
 
-        # Wait for login.
-        #
-        # The URL check alone is unreliable: notebooklm.google.com appears
-        # briefly before redirecting to accounts.google.com.  Instead, we
-        # poll for the *required cookies* to appear — that's the real
-        # proof that the user has finished logging in.
+        if not interactive:
+            # Silent mode: profile should already be logged in
+            start = time.time()
+            while time.time() - start < login_timeout:
+                try:
+                    return _extract_tokens_from_cdp_page(ws_url)
+                except RuntimeError:
+                    time.sleep(2)
+            raise RuntimeError(
+                "Persistent Chrome profile is not logged in. "
+                "Run: notebooklm-mcp-2026 login --method cdp"
+            )
+
+        # Interactive mode — wait for the user to complete Google OAuth.
         logger.info("Waiting for Google login…")
         start = time.time()
-        cookies: dict[str, str] = {}
 
         while time.time() - start < login_timeout:
             try:
-                # Check if the required auth cookies exist yet
-                raw = _get_page_cookies(ws_url)
-                candidate: dict[str, str] = {}
-                for c in raw:
-                    name = c.get("name", "")
-                    domain = c.get("domain", "")
-                    if name in ESSENTIAL_COOKIES and ".google.com" in domain:
-                        candidate[name] = c.get("value", "")
-                if REQUIRED_COOKIES.issubset(candidate.keys()):
-                    cookies = candidate
-                    break
+                cookies = _extract_cookies_from_ws(ws_url)
+                if validate_cookies(cookies):
+                    return _extract_tokens_from_cdp_page(ws_url)
             except Exception:
                 pass
-            time.sleep(5)
+            time.sleep(2)
         else:
             raise RuntimeError(
                 f"Login timed out after {login_timeout}s. "
                 "Please log in to NotebookLM in the Chrome window."
             )
-
-        # Navigate back to NotebookLM so we can extract CSRF + session ID
-        # from the page HTML (the user may still be on accounts.google.com
-        # or a consent screen after cookies are set).
-        try:
-            current_url = _get_current_url(ws_url)
-            if "notebooklm.google.com" not in current_url:
-                _navigate_to_url(ws_url, NOTEBOOKLM_URL)
-                time.sleep(3)
-        except Exception:
-            pass
-
-        # Extract CSRF and session ID from page HTML
-        html = _get_page_html(ws_url)
-        csrf_token = extract_csrf_from_html(html)
-        session_id = extract_session_id_from_html(html)
-
-        return AuthTokens(
-            cookies=cookies,
-            csrf_token=csrf_token,
-            session_id=session_id,
-            extracted_at=time.time(),
-        )
 
     finally:
         # Always clean up Chrome

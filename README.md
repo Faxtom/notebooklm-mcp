@@ -14,6 +14,8 @@
 
 Secure MCP server for querying Google NotebookLM notebooks. Designed for use with Claude Code, Cursor, VS Code Copilot, and any MCP-compatible AI assistant.
 
+> **Fork enhancements** — This fork improves on [julianoczkowski/notebooklm-mcp-2026](https://github.com/julianoczkowski/notebooklm-mcp-2026) with multi-browser auth (including [Helium](https://github.com/imputnet/helium)), automatic session refresh, and a single `login` command that verifies your account and configures MCP clients.
+
 **Watch on YouTube:** [https://youtu.be/xdI3uEA5rew?si=FkD0sdCZSFFWpjhy](https://youtu.be/xdI3uEA5rew?si=FkD0sdCZSFFWpjhy)
 
 <p align="left">
@@ -32,11 +34,19 @@ notebooklm-mcp-2026 gives AI assistants direct access to your Google NotebookLM 
 
 ## Quick Start
 
-Three commands. Works on macOS, Linux, and Windows.
+**One command** to log in, verify your account, and configure Cursor / Claude Code / VS Code. Works on macOS, Linux, and Windows.
 
 ### Step 1: Install
 
-**macOS / Linux:**
+**From this fork (recommended):**
+
+```bash
+git clone https://github.com/Faxtom/notebooklm-mcp-2026.git
+cd notebooklm-mcp-2026
+pip install -e .
+```
+
+**Or with uv (upstream package):**
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -46,25 +56,26 @@ uv tool install notebooklm-mcp-2026
 **Windows (PowerShell):**
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-uv tool install notebooklm-mcp-2026
+cd notebooklm-mcp-2026
+python -m pip install -e .
 ```
 
-> **Already have pipx?** You can use `pipx install notebooklm-mcp-2026` instead.
-
-### Step 2: Set up
-
-> **Important:** Close Google Chrome completely before running setup. The login process needs to launch Chrome with special flags, which won't work if Chrome is already running.
+### Step 2: Log in (auth + verify + MCP setup)
 
 ```bash
-notebooklm-mcp-2026 setup
+notebooklm-mcp-2026 login --browser helium --method browser
 ```
 
-This will:
+This single command:
 
-1. Open Chrome so you can log in to your Google account
-2. Detect which MCP clients you have installed (Claude Code, Cursor, VS Code, etc.)
-3. Automatically configure them
+1. Tries to import cookies from your browser (Helium, Chrome, Edge, Brave, Firefox, …)
+2. If no valid session is found, **opens the browser** so you can log in to [notebooklm.google.com](https://notebooklm.google.com)
+3. **Verifies** your account against the real NotebookLM API
+4. **Auto-configures** all detected MCP clients (Cursor, Claude Code, VS Code, …)
+
+> **Using [Helium](https://github.com/imputnet/helium)?** That's the recommended browser in this fork. Your normal Helium window can stay open — the interactive login uses an isolated profile.
+
+> **Don't want auto-setup?** Add `--skip-setup` to only authenticate.
 
 ### Step 3: Use it
 
@@ -72,16 +83,19 @@ Restart your MCP client and ask your AI assistant:
 
 > "List my NotebookLM notebooks"
 
-That's it!
+That's it! You do **not** need to run `setup` separately after `login`.
 
 ## Requirements
 
-- **Google Chrome** (or Chromium) — needed for one-time login
-- **Python 3.11+** — installed automatically if you use `uv`
+- **A Chromium-based browser** — Chrome, Edge, Brave, [Helium](https://github.com/imputnet/helium), Chromium, Opera, or Vivaldi (for interactive login)
+- **Or Firefox / LibreWolf / Safari** — cookie import only (no interactive login window)
+- **Python 3.11+**
 
-### Don't have Chrome?
+### Don't have a browser?
 
-Download it from [google.com/chrome](https://www.google.com/chrome/). On Linux, `chromium` also works.
+- **Helium (recommended):** [helium.computer](https://helium.computer) · [GitHub](https://github.com/imputnet/helium)
+- **Chrome:** [google.com/chrome](https://www.google.com/chrome/)
+- On Linux, `chromium` or the Helium `.deb` / AppImage also work
 
 ### Don't have Python?
 
@@ -99,7 +113,7 @@ If you prefer to install Python manually:
 
 ## Alternative Install Methods
 
-The Quick Start uses `uv` because it's the simplest (single binary, no Python version conflicts). Other options:
+Other install options:
 
 ```bash
 # pipx (if you already have it)
@@ -110,27 +124,79 @@ python -m venv .venv && source .venv/bin/activate
 pip install notebooklm-mcp-2026
 
 # From source
-git clone https://github.com/julianoczkowski/notebooklm-mcp-2026.git
+git clone https://github.com/Faxtom/notebooklm-mcp-2026.git
 cd notebooklm-mcp-2026
 pip install -e .
 ```
 
 ## Authentication
 
-notebooklm-mcp-2026 uses Google session cookies extracted via Chrome DevTools Protocol. No passwords are stored — only session cookies.
+notebooklm-mcp-2026 uses Google session cookies. No passwords are stored — only session cookies, a CSRF token, and a session ID.
 
-> **Important:** Close Google Chrome completely before running login. The login process needs to launch Chrome with special debugging flags, which won't work if Chrome is already running.
+### Supported browsers
+
+| Browser | Import cookies (`--method browser`) | Interactive login (`--method cdp`) |
+| ------- | --------------------------------- | ---------------------------------- |
+| **Helium** | ✅ | ✅ |
+| Chrome | ✅ | ✅ |
+| Edge | ✅ | ✅ |
+| Brave | ✅ | ✅ |
+| Chromium / Playwright | ✅ | ✅ |
+| Opera / Vivaldi | ✅ | ✅ |
+| Firefox / LibreWolf | ✅ | ❌ |
+| Safari (macOS) | ✅ | ❌ |
+
+### Login methods
+
+| Method | What it does |
+| ------ | ------------ |
+| `auto` (default) | Try browser import → silent profile refresh → interactive CDP |
+| `browser` | Import cookies; **opens the browser automatically** if no valid session |
+| `cdp` | Open browser window for manual Google login |
+| `profile` | Silent refresh from saved isolated browser profile |
+| `import` | Load cookies from a JSON file |
+
+### Examples
 
 ```bash
+# Recommended — Helium: import or open browser, then verify + configure MCP
+notebooklm-mcp-2026 login --browser helium --method browser
+
+# Auto-detect any installed browser
 notebooklm-mcp-2026 login
+
+# Interactive login with a specific browser
+notebooklm-mcp-2026 login --browser edge --method cdp
+
+# Import cookies from a JSON export
+notebooklm-mcp-2026 login --method import --import-file cookies.json
+
+# Login only, skip MCP configuration
+notebooklm-mcp-2026 login --skip-setup
 ```
 
-This opens Chrome, you log in to Google, and the tool saves the session cookies locally. Cookies last 2–4 weeks. When they expire, run `login` again.
+### Session refresh
 
-If Chrome can't be found automatically, the tool will show you the exact command to launch Chrome manually, or you can specify the path:
+When cookies expire, the MCP server tries to refresh them automatically:
+
+1. Re-import from your installed browsers (Helium first)
+2. Re-read the isolated browser profile from a previous CDP login
+3. Only then ask you to run `login` again
+
+`check_auth` validates credentials with a **real API call** (not just a homepage check).
+
+### Helium paths (Windows)
+
+| Item | Path |
+| ---- | ---- |
+| Executable | `%LOCALAPPDATA%\imput\Helium\Application\chrome.exe` |
+| Profile | `%LOCALAPPDATA%\imput\Helium\User Data` |
+
+Set a default browser with:
 
 ```bash
-notebooklm-mcp-2026 login --chrome-path "/path/to/chrome"
+export NOTEBOOKLM_BROWSER=helium   # macOS / Linux
+$env:NOTEBOOKLM_BROWSER = "helium" # Windows PowerShell
 ```
 
 ### Where credentials are stored
@@ -145,15 +211,26 @@ Override with: `NOTEBOOKLM_MCP_DATA_DIR=/custom/path`
 
 ## CLI Commands
 
-| Command                       | Description                                                             |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| `notebooklm-mcp-2026 setup`   | Interactive setup wizard — authenticates and configures your MCP client |
-| `notebooklm-mcp-2026 login`   | Authenticate via Chrome (opens browser window)                          |
-| `notebooklm-mcp-2026 logout`  | Remove stored credentials and start fresh                               |
-| `notebooklm-mcp-2026 serve`   | Start the MCP server over stdio (used by MCP clients)                   |
-| `notebooklm-mcp-2026 status`  | Show authentication and MCP client configuration status                 |
-| `notebooklm-mcp-2026 doctor`  | Diagnose common issues (Chrome, auth, permissions)                      |
-| `notebooklm-mcp-2026 version` | Print version                                                           |
+| Command | Description |
+| ------- | ----------- |
+| `notebooklm-mcp-2026 login` | Log in, verify account, and auto-configure MCP clients |
+| `notebooklm-mcp-2026 setup` | Interactive setup wizard (optional — `login` does this automatically) |
+| `notebooklm-mcp-2026 logout` | Remove stored credentials and browser profile |
+| `notebooklm-mcp-2026 serve` | Start the MCP server over stdio (used by MCP clients) |
+| `notebooklm-mcp-2026 status` | Show authentication and MCP client configuration status |
+| `notebooklm-mcp-2026 doctor` | Diagnose common issues (browsers, auth, permissions) |
+| `notebooklm-mcp-2026 version` | Print version |
+
+### Login flags
+
+| Flag | Description |
+| ---- | ----------- |
+| `--browser helium` | Use Helium (or `chrome`, `edge`, `firefox`, …) |
+| `--method browser` | Import cookies; open browser if session is missing |
+| `--method cdp` | Force interactive browser login |
+| `--skip-setup` | Skip MCP auto-configuration after login |
+| `--chrome-path PATH` | Path to browser executable |
+| `--import-file PATH` | JSON cookie file (`--method import`) |
 
 ## MCP Client Configuration
 
@@ -261,8 +338,8 @@ Replace `YOUR_USER` with your actual username, or paste the exact path from the 
 
 | Tool                 | Description                          | Key Parameters                                            |
 | -------------------- | ------------------------------------ | --------------------------------------------------------- |
-| `login`              | Launch Chrome for Google OAuth login | `timeout` (default: 300s)                                 |
-| `check_auth`         | Verify stored credentials are valid  | —                                                         |
+| `login`              | Refresh auth (browser import → CDP fallback) | `timeout` (default: 300s)                                 |
+| `check_auth`         | Verify credentials via real API call         | —                                                         |
 | `list_notebooks`     | List all notebooks with metadata     | `max_results` (default: 50)                               |
 | `get_notebook`       | Get notebook details + source list   | `notebook_id`                                             |
 | `list_sources`       | List sources in a notebook           | `notebook_id`                                             |
@@ -334,21 +411,26 @@ result = query_notebook(notebook_id="abc", query="Tell me more about that", conv
 
 ## Troubleshooting
 
-### "Not authenticated" error
-
-Run `notebooklm-mcp-2026 login` in your terminal.
-
-### "Cookies expired" error
-
-Session cookies have a limited lifespan (2–4 weeks). Run `notebooklm-mcp-2026 login` again.
-
-### "Chrome not found" error
-
-Install Google Chrome or Chromium. On Linux, ensure `google-chrome` or `chromium` is in your PATH. You can also specify the path directly:
+### "Not authenticated" or "Cookies expired"
 
 ```bash
-notebooklm-mcp-2026 login --chrome-path "/path/to/chrome"
+notebooklm-mcp-2026 login --browser helium --method browser
 ```
+
+### Browser import fails on Windows
+
+Close the browser completely before import (the cookie database is locked while the browser runs). If import fails, `--method browser` will open the browser for interactive login automatically.
+
+### "Browser not found" error
+
+Install [Helium](https://helium.computer) or Chrome, or specify the path:
+
+```bash
+notebooklm-mcp-2026 login --browser helium --method cdp
+notebooklm-mcp-2026 login --chrome-path "C:\Users\YOU\AppData\Local\imput\Helium\Application\chrome.exe"
+```
+
+Run `notebooklm-mcp-2026 doctor` to see which browsers are detected.
 
 ### Empty notebook list
 
@@ -376,11 +458,13 @@ notebooklm-mcp-2026 doctor
 
 ## Environment Variables
 
-| Variable                   | Default                                     | Description                    |
-| -------------------------- | ------------------------------------------- | ------------------------------ |
-| `NOTEBOOKLM_MCP_DATA_DIR`  | Platform default                            | Override data storage location |
-| `NOTEBOOKLM_BL`            | `boq_labs-tailwind-frontend_20260108.06_p0` | Google build label             |
-| `NOTEBOOKLM_QUERY_TIMEOUT` | `120.0`                                     | Query timeout in seconds       |
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `NOTEBOOKLM_MCP_DATA_DIR` | Platform default | Override data storage location |
+| `NOTEBOOKLM_BROWSER` | — | Preferred browser (`helium`, `chrome`, `firefox`, …) |
+| `NOTEBOOKLM_AUTH_REFRESH_COOLDOWN` | `300` | Seconds between silent session refresh attempts |
+| `NOTEBOOKLM_BL` | `boq_labs-tailwind-frontend_20260108.06_p0` | Google build label |
+| `NOTEBOOKLM_QUERY_TIMEOUT` | `120.0` | Query timeout in seconds |
 
 ## Security
 
@@ -388,9 +472,9 @@ notebooklm-mcp-2026 doctor
 - **File permissions** — credentials saved with `0o600` (owner read/write only)
 - **Directory permissions** — data directory created with `0o700` (owner only)
 - **No `eval`/`exec`** — no dynamic code execution anywhere
-- **No `shell=True`** — Chrome launched with explicit argument lists
+- **No `shell=True`** — browsers launched with explicit argument lists
 - **Cookie filtering** — only essential Google auth cookies are persisted
-- **Chrome cleanup** — Chrome process always terminated in `finally` blocks
+- **Browser cleanup** — browser process always terminated in `finally` blocks
 - **Input validation** — all tool parameters validated before use
 - **Timeouts** — all HTTP requests have explicit timeouts
 - **CSRF protection** — tokens passed in request body, auto-refreshed on expiry
@@ -420,8 +504,8 @@ This opens a browser where you can call each of the 9 tools with custom paramete
 
 ## Getting Help
 
-- **Questions?** Start a [Discussion](https://github.com/julianoczkowski/notebooklm-mcp-2026/discussions)
-- **Found a bug?** Open an [Issue](https://github.com/julianoczkowski/notebooklm-mcp-2026/issues)
+- **Questions?** Open an [Issue](https://github.com/Faxtom/notebooklm-mcp-2026/issues)
+- **Found a bug?** Open an [Issue](https://github.com/Faxtom/notebooklm-mcp-2026/issues)
 - **Want to contribute?** See [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Security issue?** See [SECURITY.md](SECURITY.md) for responsible disclosure
 

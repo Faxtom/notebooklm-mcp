@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,8 +10,11 @@ import pytest
 from notebooklm_mcp_2026 import auth
 from notebooklm_mcp_2026.auth import (
     AuthTokens,
+    build_tokens_from_cookies,
     extract_csrf_from_html,
     extract_session_id_from_html,
+    filter_essential_cookies,
+    import_cookies_from_file,
     load_tokens,
     save_tokens,
     validate_cookies,
@@ -96,6 +100,182 @@ class TestValidateCookies:
 
     def test_empty(self):
         assert validate_cookies({}) is False
+
+
+class TestFilterEssentialCookies:
+    def test_keeps_essential_only(self, sample_cookies):
+        extra = {**sample_cookies, "NID": "noise", "1P_JAR": "noise"}
+        filtered = filter_essential_cookies(extra)
+        assert "NID" not in filtered
+        assert filtered["SID"] == sample_cookies["SID"]
+
+
+class TestImportCookiesFromFile:
+    def test_flat_dict(self, sample_cookies, tmp_path):
+        path = tmp_path / "cookies.json"
+        path.write_text(json.dumps(sample_cookies))
+        with patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies") as mock_build:
+            mock_build.return_value = AuthTokens(cookies=sample_cookies)
+            result = import_cookies_from_file(path)
+        mock_build.assert_called_once()
+        assert result.cookies == sample_cookies
+
+    def test_nested_cookies_key(self, sample_cookies, tmp_path):
+        path = tmp_path / "cookies.json"
+        path.write_text(json.dumps({"cookies": sample_cookies}))
+        with patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies") as mock_build:
+            mock_build.return_value = AuthTokens(cookies=sample_cookies)
+            import_cookies_from_file(path)
+        mock_build.assert_called_once_with(sample_cookies)
+
+    def test_devtools_list_format(self, tmp_path):
+        path = tmp_path / "cookies.json"
+        path.write_text(json.dumps([
+            {"name": "SID", "value": "abc"},
+            {"name": "HSID", "value": "def"},
+        ]))
+        with patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies") as mock_build:
+            mock_build.return_value = AuthTokens(cookies={"SID": "abc"})
+            import_cookies_from_file(path)
+        mock_build.assert_called_once_with({"SID": "abc", "HSID": "def"})
+
+
+class TestBuildTokensFromCookies:
+    def test_missing_required_raises(self):
+        with pytest.raises(RuntimeError, match="Missing required"):
+            build_tokens_from_cookies({"SID": "only-one"})
+
+    def test_fetches_csrf(self, sample_cookies):
+        html = '"SNlM0e":"csrf-from-page"'
+        mock_resp = MagicMock()
+        mock_resp.url = "https://notebooklm.google.com/"
+        mock_resp.status_code = 200
+        mock_resp.text = html
+
+        mock_client = MagicMock()
+        mock_client.get.return_value = mock_resp
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        with patch("httpx.Client", return_value=mock_client):
+            tokens = build_tokens_from_cookies(sample_cookies)
+
+        assert tokens.csrf_token == "csrf-from-page"
+        assert tokens.cookies["SID"] == sample_cookies["SID"]
+
+
+class TestHeliumSupport:
+    def test_user_data_dir_windows(self):
+        from notebooklm_mcp_2026.auth import helium_user_data_dir
+
+        with patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\Test\AppData\Local"}), \
+             patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"):
+            path = helium_user_data_dir()
+        assert path == Path(r"C:\Users\Test\AppData\Local\imput\Helium\User Data")
+
+    def test_user_data_dir_macos(self):
+        from notebooklm_mcp_2026.auth import helium_user_data_dir
+
+        with patch("notebooklm_mcp_2026.auth.platform.system", return_value="Darwin"):
+            path = helium_user_data_dir()
+        assert path.name == "net.imput.helium"
+
+    def test_cookie_db_paths(self, tmp_path):
+        from notebooklm_mcp_2026.auth import helium_cookie_db_paths
+
+        user_data = tmp_path / "User Data"
+        profile = user_data / "Default" / "Network"
+        profile.mkdir(parents=True)
+        cookies = profile / "Cookies"
+        cookies.write_bytes(b"sqlite")
+        (user_data / "Local State").write_text("{}")
+
+        with patch("notebooklm_mcp_2026.auth.helium_user_data_dir", return_value=user_data):
+            paths = helium_cookie_db_paths()
+
+        assert paths is not None
+        assert paths[0] == cookies
+
+    def test_executable_candidates_versioned(self, tmp_path):
+        from notebooklm_mcp_2026.auth import _helium_executable_candidates
+
+        app = tmp_path / "imput" / "Helium" / "Application" / "145.0.0.0"
+        app.mkdir(parents=True)
+        exe = app / "chrome.exe"
+        exe.write_text("")
+
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}), \
+             patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"):
+            found = _helium_executable_candidates()
+
+        assert str(exe) in [str(p) for p in found]
+
+    @patch("notebooklm_mcp_2026.auth.helium_cookie_db_paths")
+    def test_load_helium_cookies(self, mock_paths, sample_cookies):
+        mock_paths.return_value = (Path("/fake/Cookies"), Path("/fake/Local State"))
+        cookie = MagicMock()
+        cookie.name = "SID"
+        cookie.value = sample_cookies["SID"]
+
+        import browser_cookie3
+
+        with patch.object(browser_cookie3, "chrome", return_value=[cookie]) as mock_chrome:
+            from notebooklm_mcp_2026.auth import _load_helium_cookies
+
+            cookies = _load_helium_cookies()
+        assert cookies["SID"] == sample_cookies["SID"]
+        mock_chrome.assert_called_once()
+
+    @patch("notebooklm_mcp_2026.auth._load_helium_cookies")
+    @patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies")
+    def test_extract_helium_browser(self, mock_build, mock_load, sample_cookies):
+        mock_load.return_value = sample_cookies
+        mock_build.return_value = AuthTokens(cookies=sample_cookies)
+
+        from notebooklm_mcp_2026.auth import extract_cookies_from_browser
+
+        extract_cookies_from_browser(browser="helium")
+        mock_load.assert_called_once()
+
+
+class TestBrowserSupport:
+    def test_normalize_unknown_browser(self):
+        from notebooklm_mcp_2026.auth import _normalize_browser_name
+
+        with pytest.raises(ValueError, match="Unknown browser"):
+            _normalize_browser_name("internet-explorer")
+
+    def test_chromium_detected_on_windows_playwright(self):
+        from notebooklm_mcp_2026.auth import get_browser_executable
+
+        with patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"), \
+             patch.object(Path, "exists", return_value=True):
+            path = get_browser_executable("chromium")
+        assert path is not None
+
+    @patch("notebooklm_mcp_2026.auth._load_cookies_with_browser_cookie3")
+    @patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies")
+    def test_extract_from_specific_browser(self, mock_build, mock_load, sample_cookies):
+        mock_load.return_value = sample_cookies
+        mock_build.return_value = AuthTokens(cookies=sample_cookies)
+
+        from notebooklm_mcp_2026.auth import extract_cookies_from_browser
+
+        tokens = extract_cookies_from_browser(browser="firefox")
+        mock_load.assert_called_once_with("firefox")
+        assert tokens.cookies == sample_cookies
+
+    @patch("notebooklm_mcp_2026.auth._load_cookies_with_browser_cookie3")
+    def test_extract_tries_multiple_browsers(self, mock_load, sample_cookies):
+        mock_load.side_effect = [RuntimeError("fail"), sample_cookies]
+
+        from notebooklm_mcp_2026.auth import extract_cookies_from_browser
+
+        with patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies") as mock_build:
+            mock_build.return_value = AuthTokens(cookies=sample_cookies)
+            extract_cookies_from_browser()
+
+        assert mock_load.call_count == 2
 
 
 class TestExtractCsrf:

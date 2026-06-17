@@ -7,6 +7,7 @@ from unittest.mock import patch
 from notebooklm_mcp_2026.cli import (
     ClaudeCodeConfig,
     CursorConfig,
+    _browser_can_open_for_login,
     merge_mcp_config,
 )
 
@@ -159,3 +160,14 @@ class TestClientDetection:
         assert path is not None
         assert path.name == "mcp.json"
         assert ".cursor" in str(path)
+
+
+class TestBrowserLoginFallback:
+    @patch("notebooklm_mcp_2026.auth.get_browser_executable", return_value="/fake/helium")
+    @patch("notebooklm_mcp_2026.auth.BROWSER_META", {"helium": {"cdp": True}})
+    def test_helium_can_open_for_login(self, _mock_exe):
+        assert _browser_can_open_for_login("helium") is True
+
+    def test_firefox_cannot_open_for_login(self):
+        with patch("notebooklm_mcp_2026.auth.BROWSER_META", {"firefox": {"cdp": False}}):
+            assert _browser_can_open_for_login("firefox") is False

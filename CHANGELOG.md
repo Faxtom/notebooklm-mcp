@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-17
+
+Fork by [@Faxtom](https://github.com/Faxtom) — based on [julianoczkowski/notebooklm-mcp-2026](https://github.com/julianoczkowski/notebooklm-mcp-2026).
+
+### Added
+- Multi-browser authentication (Chrome, Edge, Brave, Opera, Vivaldi, Firefox, Safari)
+- First-class [Helium](https://github.com/imputnet/helium) browser support (cookie import + CDP login)
+- `login --method browser` opens the browser automatically when no valid session is found
+- `login` auto-verifies the account via real API call and configures MCP clients (no separate `setup` needed)
+- Silent session refresh from installed browsers and persistent CDP profile
+- `NOTEBOOKLM_BROWSER` and `NOTEBOOKLM_AUTH_REFRESH_COOLDOWN` environment variables
+- Login flags: `--browser`, `--method`, `--skip-setup`, `--import-file`
+
+### Changed
+- `check_auth` validates credentials with a real `list_notebooks` API call
+- `doctor` reports all detected browsers, not only Chrome
+- README updated for the new one-command workflow
+
+### Dependencies
+- Added `browser-cookie3>=0.19.1`
+
 ## [0.2.1] - 2026-05-01
 
 ### Added

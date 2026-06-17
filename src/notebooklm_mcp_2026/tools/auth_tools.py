@@ -7,25 +7,35 @@ from typing import Any
 
 
 def login(timeout: int = 300) -> dict[str, Any]:
-    """Launch Chrome for Google login and extract authentication cookies.
+    """Refresh authentication without opening Chrome when possible.
 
-    This opens a Chrome window where you log in to your Google account.
-    After successful login, cookies are extracted automatically via the
-    Chrome DevTools Protocol and saved locally.
-
-    **This tool is interactive** — it blocks until you complete login or
-    the timeout expires.
+    Tries importing cookies from the system Chrome profile first, then
+    silent profile refresh, then interactive CDP as a last resort.
 
     Args:
-        timeout: Maximum seconds to wait for login (default: 300).
+        timeout: Maximum seconds to wait for interactive CDP login (default: 300).
 
     Returns:
         Status dict with cookie count on success, or error message.
     """
-    from ..auth import extract_cookies_via_cdp, save_tokens
+    from ..auth import (
+        extract_cookies_from_browser,
+        extract_cookies_via_cdp,
+        get_cdp_browser_executable,
+        save_tokens,
+        try_silent_token_refresh,
+    )
 
     try:
-        tokens = extract_cookies_via_cdp(login_timeout=timeout)
+        tokens = try_silent_token_refresh(force=True)
+        if tokens is None:
+            try:
+                tokens = extract_cookies_from_browser()
+            except Exception:
+                if get_cdp_browser_executable() is not None:
+                    tokens = extract_cookies_via_cdp(login_timeout=timeout)
+                else:
+                    raise
         save_tokens(tokens)
         return {
             "status": "success",
@@ -57,8 +67,8 @@ def check_auth() -> dict[str, Any]:
             "message": "No saved credentials found. Run 'notebooklm-mcp-2026 login' first.",
         }
 
-    # Try to validate by refreshing the CSRF token
-    from ..client import NotebookLMClient, AuthenticationError
+    # Validate with a real API call (homepage CSRF alone can look valid while RPC fails)
+    from ..client import NotebookLMClient, AuthenticationError, APIError
 
     try:
         client = NotebookLMClient(
@@ -66,6 +76,7 @@ def check_auth() -> dict[str, Any]:
             csrf_token=tokens.csrf_token,
             session_id=tokens.session_id,
         )
+        client.list_notebooks()
         client.close()
 
         age_hours = (time.time() - tokens.extracted_at) / 3600
@@ -75,11 +86,42 @@ def check_auth() -> dict[str, Any]:
             "cookie_count": len(tokens.cookies),
             "age_hours": round(age_hours, 1),
         }
+    except APIError as e:
+        return {
+            "status": "error",
+            "error": f"API validation failed: {e}",
+        }
     except AuthenticationError as e:
+        # Last attempt: silent refresh before reporting expired
+        from ..auth import try_silent_token_refresh
+
+        refreshed = try_silent_token_refresh(force=True)
+        if refreshed is not None:
+            try:
+                client = NotebookLMClient(
+                    cookies=refreshed.cookies,
+                    csrf_token=refreshed.csrf_token,
+                    session_id=refreshed.session_id,
+                )
+                client.list_notebooks()
+                client.close()
+                age_hours = (time.time() - refreshed.extracted_at) / 3600
+                return {
+                    "status": "authenticated",
+                    "message": "Credentials refreshed automatically.",
+                    "cookie_count": len(refreshed.cookies),
+                    "age_hours": round(age_hours, 1),
+                }
+            except AuthenticationError:
+                pass
+
         return {
             "status": "expired",
             "message": str(e),
-            "hint": "Run 'notebooklm-mcp-2026 login' to re-authenticate.",
+            "hint": (
+                "Run 'notebooklm-mcp-2026 login' (auto-imports from Chrome) "
+                "or 'notebooklm-mcp-2026 login --method cdp'."
+            ),
         }
     except Exception as e:
         return {

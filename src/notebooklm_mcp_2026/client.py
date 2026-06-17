@@ -28,6 +28,7 @@ from .auth import (
     extract_session_id_from_html,
     load_tokens,
     save_tokens,
+    try_silent_token_refresh,
 )
 from .protocol import (
     AuthExpiredError,
@@ -159,9 +160,19 @@ class NotebookLMClient:
             resp = tmp.get(f"{config.BASE_URL}/")
 
             if "accounts.google.com" in str(resp.url):
+                refreshed = try_silent_token_refresh()
+                if refreshed:
+                    self.cookies = refreshed.cookies
+                    self.csrf_token = refreshed.csrf_token
+                    self._session_id = refreshed.session_id
+                    self._client = None
+                    return self._refresh_auth_tokens()
                 raise AuthenticationError(
                     "Cookies expired — redirected to Google login.",
-                    hint="Run 'notebooklm-mcp-2026 login' to re-authenticate.",
+                    hint=(
+                        "Run 'notebooklm-mcp-2026 login' (tries browser import first) "
+                        "or 'notebooklm-mcp-2026 login --method cdp'."
+                    ),
                 )
 
             if resp.status_code != 200:
@@ -288,14 +299,20 @@ class NotebookLMClient:
         try:
             self._refresh_auth_tokens()
         except AuthenticationError:
-            # Try reloading from disk (user may have re-logged in externally)
-            disk_tokens = load_tokens()
-            if disk_tokens and disk_tokens.cookies:
-                self.cookies = disk_tokens.cookies
-                self.csrf_token = disk_tokens.csrf_token
-                self._session_id = disk_tokens.session_id
+            # Try silent refresh, then reload from disk (user may have re-logged in)
+            refreshed = try_silent_token_refresh()
+            if refreshed:
+                self.cookies = refreshed.cookies
+                self.csrf_token = refreshed.csrf_token
+                self._session_id = refreshed.session_id
             else:
-                raise
+                disk_tokens = load_tokens()
+                if disk_tokens and disk_tokens.cookies:
+                    self.cookies = disk_tokens.cookies
+                    self.csrf_token = disk_tokens.csrf_token
+                    self._session_id = disk_tokens.session_id
+                else:
+                    raise
 
         # Recreate HTTP client with fresh cookies/CSRF
         self._client = None

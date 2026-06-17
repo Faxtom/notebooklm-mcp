@@ -121,6 +121,15 @@ PAGE_FETCH_HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
+# Auth refresh — try re-importing cookies before asking the user to log in again
+# ---------------------------------------------------------------------------
+
+# Seconds between silent refresh attempts (profile / browser import)
+AUTH_SILENT_REFRESH_COOLDOWN = float(
+    os.environ.get("NOTEBOOKLM_AUTH_REFRESH_COOLDOWN", "300")
+)
+
+# ---------------------------------------------------------------------------
 # Retry configuration
 # ---------------------------------------------------------------------------
 

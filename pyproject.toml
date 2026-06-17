@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "notebooklm-mcp-2026"
-version = "0.2.1"
+version = "0.3.0"
 description = "Secure MCP server for querying Google NotebookLM notebooks"
 readme = "README.md"
 license = "MIT"
@@ -29,13 +29,14 @@ dependencies = [
     "platformdirs>=4.0.0",
     "rich>=13.0.0",
     "questionary>=2.0.0",
+    "browser-cookie3>=0.19.1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/julianoczkowski/notebooklm-mcp-2026"
-Repository = "https://github.com/julianoczkowski/notebooklm-mcp-2026"
-Issues = "https://github.com/julianoczkowski/notebooklm-mcp-2026/issues"
-Changelog = "https://github.com/julianoczkowski/notebooklm-mcp-2026/blob/master/CHANGELOG.md"
+Homepage = "https://github.com/Faxtom/notebooklm-mcp-2026"
+Repository = "https://github.com/Faxtom/notebooklm-mcp-2026"
+Issues = "https://github.com/Faxtom/notebooklm-mcp-2026/issues"
+Changelog = "https://github.com/Faxtom/notebooklm-mcp-2026/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
