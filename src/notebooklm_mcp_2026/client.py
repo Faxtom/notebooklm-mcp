@@ -184,8 +184,7 @@ class NotebookLMClient:
             csrf = extract_csrf_from_html(html)
             if not csrf:
                 raise AuthenticationError(
-                    "Could not extract CSRF token from page. "
-                    "The page structure may have changed."
+                    "Could not extract CSRF token from page. The page structure may have changed."
                 )
             self.csrf_token = csrf
 
@@ -261,7 +260,10 @@ class NotebookLMClient:
                     )
                     time.sleep(delay)
                     return self._call_rpc(
-                        rpc_id, params, path, timeout,
+                        rpc_id,
+                        params,
+                        path,
+                        timeout,
                         _auth_retried=_auth_retried,
                         _server_retry=_server_retry + 1,
                     )
@@ -317,7 +319,10 @@ class NotebookLMClient:
         # Recreate HTTP client with fresh cookies/CSRF
         self._client = None
         return self._call_rpc(
-            rpc_id, params, path, timeout,
+            rpc_id,
+            params,
+            path,
+            timeout,
             _auth_retried=True,
         )
 
@@ -376,16 +381,18 @@ class NotebookLMClient:
                         sid = sid[0]
                     sources.append({"id": sid, "title": src[1] if len(src) > 1 else "Untitled"})
 
-            notebooks.append({
-                "id": notebook_id,
-                "title": title,
-                "source_count": len(sources),
-                "sources": sources,
-                "is_owned": is_owned,
-                "is_shared": is_shared,
-                "created_at": created_at,
-                "modified_at": modified_at,
-            })
+            notebooks.append(
+                {
+                    "id": notebook_id,
+                    "title": title,
+                    "source_count": len(sources),
+                    "sources": sources,
+                    "is_owned": is_owned,
+                    "is_shared": is_shared,
+                    "created_at": created_at,
+                    "modified_at": modified_at,
+                }
+            )
 
         return notebooks
 
@@ -434,13 +441,15 @@ class NotebookLMClient:
                 if len(metadata) > 7 and isinstance(metadata[7], list) and metadata[7]:
                     url = metadata[7][0]
 
-            sources.append({
-                "id": source_id,
-                "title": title,
-                "source_type": source_type,
-                "source_type_name": config.SOURCE_TYPES.get(source_type, "unknown"),
-                "url": url,
-            })
+            sources.append(
+                {
+                    "id": source_id,
+                    "title": title,
+                    "source_type": source_type,
+                    "source_type_name": config.SOURCE_TYPES.get(source_type, "unknown"),
+                    "url": url,
+                }
+            )
 
         return sources
 

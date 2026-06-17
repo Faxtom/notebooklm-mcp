@@ -13,9 +13,7 @@ from platformdirs import user_data_dir
 # Storage paths
 # ---------------------------------------------------------------------------
 
-STORAGE_DIR = Path(
-    os.environ.get("NOTEBOOKLM_MCP_DATA_DIR", user_data_dir("notebooklm-mcp-2026"))
-)
+STORAGE_DIR = Path(os.environ.get("NOTEBOOKLM_MCP_DATA_DIR", user_data_dir("notebooklm-mcp-2026")))
 AUTH_FILE = STORAGE_DIR / "auth.json"
 CHROME_PROFILE_DIR = STORAGE_DIR / "chrome-profile"
 
@@ -43,9 +41,9 @@ BUILD_LABEL = os.environ.get(
 
 RPC_LIST_NOTEBOOKS = "wXbhsf"
 RPC_GET_NOTEBOOK = "rLM1Ne"
-RPC_GET_SOURCE = "hizoJc"       # Full text content of a source
-RPC_ADD_SOURCE = "izAoDd"       # Add URL or text source
-RPC_GET_SOURCE_GUIDE = "tr032e" # AI summary + keywords for a source
+RPC_GET_SOURCE = "hizoJc"  # Full text content of a source
+RPC_ADD_SOURCE = "izAoDd"  # Add URL or text source
+RPC_GET_SOURCE_GUIDE = "tr032e"  # AI summary + keywords for a source
 
 # ---------------------------------------------------------------------------
 # Source type codes (from Google's internal API)
@@ -72,14 +70,26 @@ SOURCE_TYPES: dict[int, str] = {
 REQUIRED_COOKIES = frozenset({"SID", "HSID", "SSID", "APISID", "SAPISID"})
 
 # Full set of cookies we keep from Chrome (superset of REQUIRED_COOKIES)
-ESSENTIAL_COOKIES = frozenset({
-    "SID", "HSID", "SSID", "APISID", "SAPISID",
-    "__Secure-1PSID", "__Secure-3PSID",
-    "__Secure-1PAPISID", "__Secure-3PAPISID",
-    "OSID", "__Secure-OSID",
-    "__Secure-1PSIDTS", "__Secure-3PSIDTS",
-    "SIDCC", "__Secure-1PSIDCC", "__Secure-3PSIDCC",
-})
+ESSENTIAL_COOKIES = frozenset(
+    {
+        "SID",
+        "HSID",
+        "SSID",
+        "APISID",
+        "SAPISID",
+        "__Secure-1PSID",
+        "__Secure-3PSID",
+        "__Secure-1PAPISID",
+        "__Secure-3PAPISID",
+        "OSID",
+        "__Secure-OSID",
+        "__Secure-1PSIDTS",
+        "__Secure-3PSIDTS",
+        "SIDCC",
+        "__Secure-1PSIDCC",
+        "__Secure-3PSIDCC",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Timeouts (seconds)
@@ -125,15 +135,13 @@ PAGE_FETCH_HEADERS = {
 # ---------------------------------------------------------------------------
 
 # Seconds between silent refresh attempts (profile / browser import)
-AUTH_SILENT_REFRESH_COOLDOWN = float(
-    os.environ.get("NOTEBOOKLM_AUTH_REFRESH_COOLDOWN", "300")
-)
+AUTH_SILENT_REFRESH_COOLDOWN = float(os.environ.get("NOTEBOOKLM_AUTH_REFRESH_COOLDOWN", "300"))
 
 # ---------------------------------------------------------------------------
 # Retry configuration
 # ---------------------------------------------------------------------------
 
 MAX_RETRIES = 3
-RETRY_BASE_DELAY = 1.0   # seconds
-RETRY_MAX_DELAY = 16.0   # seconds
+RETRY_BASE_DELAY = 1.0  # seconds
+RETRY_MAX_DELAY = 16.0  # seconds
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})

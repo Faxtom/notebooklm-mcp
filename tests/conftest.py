@@ -14,6 +14,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             if "chrome" in item.keywords:
                 item.add_marker(skip_chrome)
 
+
 XSSI_PREFIX = ")]}'"
 
 
@@ -70,12 +71,8 @@ def sample_batchexecute_response() -> str:
 def sample_query_response() -> str:
     """A realistic streaming query response."""
     # Type 2 = thinking (comes first)
-    inner_thinking = json.dumps(
-        [["Thinking about the question...", None, [], None, [2]]]
-    )
-    chunk_thinking = json.dumps(
-        [["wrb.fr", None, inner_thinking, None, None, None, "generic"]]
-    )
+    inner_thinking = json.dumps([["Thinking about the question...", None, [], None, [2]]])
+    chunk_thinking = json.dumps([["wrb.fr", None, inner_thinking, None, None, None, "generic"]])
 
     # Type 1 = actual answer
     inner_answer = json.dumps(
@@ -89,8 +86,6 @@ def sample_query_response() -> str:
             ]
         ]
     )
-    chunk_answer = json.dumps(
-        [["wrb.fr", None, inner_answer, None, None, None, "generic"]]
-    )
+    chunk_answer = json.dumps([["wrb.fr", None, inner_answer, None, None, None, "generic"]])
 
     return _build_batchexecute_response(chunk_thinking, chunk_answer)

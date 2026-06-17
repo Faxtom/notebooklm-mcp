@@ -108,9 +108,7 @@ class TestExtractRpcResult:
         assert result is None
 
     def test_raises_on_error_16(self):
-        error_chunk = [
-            ["wrb.fr", "wXbhsf", None, None, None, [16], "generic"]
-        ]
+        error_chunk = [["wrb.fr", "wXbhsf", None, None, None, [16], "generic"]]
         with pytest.raises(AuthExpiredError):
             extract_rpc_result([error_chunk], "wXbhsf")
 
@@ -158,7 +156,15 @@ class TestParseQueryResponse:
         from tests.conftest import _build_batchexecute_response
 
         inner = json.dumps(
-            [["This is a long thinking text that is definitely over twenty chars.", None, [], None, [2]]]
+            [
+                [
+                    "This is a long thinking text that is definitely over twenty chars.",
+                    None,
+                    [],
+                    None,
+                    [2],
+                ]
+            ]
         )
         chunk = json.dumps([["wrb.fr", None, inner, None, None, None, "generic"]])
         resp = _build_batchexecute_response(chunk)

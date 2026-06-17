@@ -67,12 +67,14 @@ def show_banner() -> None:
     content.append("\n")
     content.append_text(byline)
 
-    console.print(Panel(
-        content,
-        box=box.DOUBLE,
-        border_style=BRAND_COLOR,
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            content,
+            box=box.DOUBLE,
+            border_style=BRAND_COLOR,
+            padding=(1, 2),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +172,7 @@ MCP_CLIENTS: list[MCPClientConfig] = [
     VSCodeConfig(),
     ClaudeDesktopConfig(),
 ]
+
 
 def _get_server_entry() -> dict[str, Any]:
     """Build the MCP server entry for config files.
@@ -286,14 +289,12 @@ def handle_setup(*, dry_run: bool = False) -> None:
                     sys.exit(1)
             else:
                 console.print(
-                    "  [dim]Skipping — you can log in later with: "
-                    "notebooklm-mcp-2026 login[/dim]"
+                    "  [dim]Skipping — you can log in later with: notebooklm-mcp-2026 login[/dim]"
                 )
     else:
         age_hours = (time.time() - tokens.extracted_at) / 3600
         console.print(
-            f"  [green]Authenticated[/green] "
-            f"({len(tokens.cookies)} cookies, {age_hours:.0f}h old)"
+            f"  [green]Authenticated[/green] ({len(tokens.cookies)} cookies, {age_hours:.0f}h old)"
         )
 
     console.print()
@@ -349,8 +350,7 @@ def _configure_mcp_clients(
         choices = questionary.checkbox(
             "Which clients should be configured?",
             choices=[
-                questionary.Choice(title=c.name, value=c.slug, checked=True)
-                for c in detected
+                questionary.Choice(title=c.name, value=c.slug, checked=True) for c in detected
             ],
         ).ask()
 
@@ -405,26 +405,25 @@ def _auto_setup_after_login() -> None:
     console.print("[bold]Verifying account…[/bold]", style=BRAND_COLOR)
     with console.status("  Checking NotebookLM access...", spinner="dots"):
         result = _verify_authenticated_account()
-    console.print(
-        f"  [green]Account verified[/green] "
-        f"({result.get('cookie_count', '?')} cookies)"
-    )
+    console.print(f"  [green]Account verified[/green] ({result.get('cookie_count', '?')} cookies)")
     console.print()
     results = _configure_mcp_clients(auto_all=True)
     console.print()
     if results:
         _show_success_panel(results)
     else:
-        console.print(Panel(
-            "[green bold]Login complete![/green bold]\n\n"
-            "Your account is verified, but no MCP clients were detected.\n"
-            "Install Cursor, Claude Code, or VS Code and run "
-            "[bold]notebooklm-mcp-2026 setup[/bold].",
-            title="[green]Authenticated[/green]",
-            border_style=SUCCESS_COLOR,
-            box=box.ROUNDED,
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                "[green bold]Login complete![/green bold]\n\n"
+                "Your account is verified, but no MCP clients were detected.\n"
+                "Install Cursor, Claude Code, or VS Code and run "
+                "[bold]notebooklm-mcp-2026 setup[/bold].",
+                title="[green]Authenticated[/green]",
+                border_style=SUCCESS_COLOR,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
 
 
 def _show_success_panel(results: list[tuple[str, bool]]) -> None:
@@ -432,19 +431,20 @@ def _show_success_panel(results: list[tuple[str, bool]]) -> None:
     success_count = sum(1 for _, ok in results if ok)
 
     if success_count == 0:
-        console.print(Panel(
-            "[red bold]No clients were configured successfully.[/red bold]\n"
-            "Check the error messages above and try again.",
-            title="Setup Failed",
-            border_style=ERROR_COLOR,
-            box=box.ROUNDED,
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                "[red bold]No clients were configured successfully.[/red bold]\n"
+                "Check the error messages above and try again.",
+                title="Setup Failed",
+                border_style=ERROR_COLOR,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
         return
 
     lines = [
-        f"[green bold]Setup complete![/green bold] "
-        f"Configured {success_count} client(s).\n",
+        f"[green bold]Setup complete![/green bold] Configured {success_count} client(s).\n",
         "[bold]Next steps:[/bold]",
         "",
         "  1. Restart your MCP client (Claude Code, Cursor, VS Code)",
@@ -456,13 +456,15 @@ def _show_success_panel(results: list[tuple[str, bool]]) -> None:
         "[dim]More info: https://github.com/julianoczkowski/notebooklm-mcp-2026[/dim]",
     ]
 
-    console.print(Panel(
-        "\n".join(lines),
-        title="[green]Success[/green]",
-        border_style=SUCCESS_COLOR,
-        box=box.ROUNDED,
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[green]Success[/green]",
+            border_style=SUCCESS_COLOR,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
 
 
 def _run_login(
@@ -478,7 +480,6 @@ def _run_login(
 
     from .auth import (
         extract_cookies_from_browser,
-        extract_cookies_via_cdp,
         import_cookies_from_file,
         load_tokens,
         save_tokens,
@@ -555,13 +556,20 @@ def _run_login(
 
 def _browser_can_open_for_login(browser: str | None) -> bool:
     """Return True if we can open an interactive login window for *browser*."""
-    from .auth import BROWSER_META, _normalize_browser_name, get_browser_executable, get_cdp_browser_executable
+    from .auth import (
+        BROWSER_META,
+        _normalize_browser_name,
+        get_browser_executable,
+        get_cdp_browser_executable,
+    )
 
     if browser is not None:
         name = _normalize_browser_name(browser)
         if not BROWSER_META[name]["cdp"]:
             return False
-        return get_browser_executable(name) is not None or get_cdp_browser_executable(name) is not None
+        return (
+            get_browser_executable(name) is not None or get_cdp_browser_executable(name) is not None
+        )
     return get_cdp_browser_executable() is not None
 
 
@@ -576,16 +584,18 @@ def _normalize_browser_cli(browser: str | None) -> str:
 def _show_login_success(tokens) -> None:
     """Display successful login panel."""
     console.print()
-    console.print(Panel(
-        f"[green bold]Authenticated![/green bold]  "
-        f"Saved {len(tokens.cookies)} cookies.\n"
-        + ("  CSRF token: [green]extracted[/green]\n" if tokens.csrf_token else "")
-        + ("  Session ID: [green]extracted[/green]" if tokens.session_id else ""),
-        title="[green]Login Successful[/green]",
-        border_style=SUCCESS_COLOR,
-        box=box.ROUNDED,
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            f"[green bold]Authenticated![/green bold]  "
+            f"Saved {len(tokens.cookies)} cookies.\n"
+            + ("  CSRF token: [green]extracted[/green]\n" if tokens.csrf_token else "")
+            + ("  Session ID: [green]extracted[/green]" if tokens.session_id else ""),
+            title="[green]Login Successful[/green]",
+            border_style=SUCCESS_COLOR,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
     console.print()
 
 
@@ -609,15 +619,17 @@ def _run_cdp_login(
                     browser_label = meta["label"]
                     break
 
-    console.print(Panel(
-        f"[bold]Browser Login (CDP)[/bold]\n\n"
-        f"Opens {browser_label} in an isolated profile "
-        "(your normal browser can stay open).\n"
-        "Log in to your Google account on notebooklm.google.com.",
-        border_style=BRAND_COLOR,
-        box=box.ROUNDED,
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            f"[bold]Browser Login (CDP)[/bold]\n\n"
+            f"Opens {browser_label} in an isolated profile "
+            "(your normal browser can stay open).\n"
+            "Log in to your Google account on notebooklm.google.com.",
+            border_style=BRAND_COLOR,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
 
     from .auth import extract_cookies_via_cdp, save_tokens
 
@@ -626,7 +638,7 @@ def _run_cdp_login(
         args_str = " ".join(launch_args)
         system = platform.system()
         if system == "Windows":
-            hint = r'%LOCALAPPDATA%\imput\Helium\Application\chrome.exe'
+            hint = r"%LOCALAPPDATA%\imput\Helium\Application\chrome.exe"
             hint_alt = r'"C:\Program Files\Google\Chrome\Application\chrome.exe"'
         elif system == "Darwin":
             hint = '"/Applications/Helium.app/Contents/MacOS/Helium"'
@@ -636,19 +648,21 @@ def _run_cdp_login(
             hint_alt = "google-chrome"
 
         console.print()
-        console.print(Panel(
-            "[bold yellow]Browser was not found automatically.[/bold yellow]\n\n"
-            "Run this command in another terminal (Helium or Chromium):\n\n"
-            f"  [bold cyan]{hint} {args_str}[/bold cyan]\n\n"
-            f"  [dim]or: {hint_alt} {args_str}[/dim]\n\n"
-            "Or re-run with your browser path:\n\n"
-            '  [bold]notebooklm-mcp-2026 login --browser helium --method cdp[/bold]\n'
-            '  [bold]notebooklm-mcp-2026 login --chrome-path "/path/to/browser"[/bold]',
-            title="[yellow]Manual Chrome Launch[/yellow]",
-            border_style=WARNING_COLOR,
-            box=box.ROUNDED,
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                "[bold yellow]Browser was not found automatically.[/bold yellow]\n\n"
+                "Run this command in another terminal (Helium or Chromium):\n\n"
+                f"  [bold cyan]{hint} {args_str}[/bold cyan]\n\n"
+                f"  [dim]or: {hint_alt} {args_str}[/dim]\n\n"
+                "Or re-run with your browser path:\n\n"
+                "  [bold]notebooklm-mcp-2026 login --browser helium --method cdp[/bold]\n"
+                '  [bold]notebooklm-mcp-2026 login --chrome-path "/path/to/browser"[/bold]',
+                title="[yellow]Manual Chrome Launch[/yellow]",
+                border_style=WARNING_COLOR,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
         console.print()
 
     try:
@@ -701,15 +715,17 @@ def handle_login(
             browser=browser,
         )
         if skip_setup:
-            console.print(Panel(
-                "[green bold]Login complete![/green bold]\n\n"
-                "Restart your MCP client and try:\n"
-                '[italic]"List my NotebookLM notebooks"[/italic]',
-                title="[green]Success[/green]",
-                border_style=SUCCESS_COLOR,
-                box=box.ROUNDED,
-                padding=(1, 2),
-            ))
+            console.print(
+                Panel(
+                    "[green bold]Login complete![/green bold]\n\n"
+                    "Restart your MCP client and try:\n"
+                    '[italic]"List my NotebookLM notebooks"[/italic]',
+                    title="[green]Success[/green]",
+                    border_style=SUCCESS_COLOR,
+                    box=box.ROUNDED,
+                    padding=(1, 2),
+                )
+            )
             return
         _auto_setup_after_login()
     except Exception:
@@ -858,15 +874,17 @@ def handle_logout() -> None:
         removed.append(f"Chrome profile: {CHROME_PROFILE_DIR}")
 
     if removed:
-        console.print(Panel(
-            "[green bold]Logged out.[/green bold]\n\n"
-            + "\n".join(f"  Removed: [dim]{r}[/dim]" for r in removed)
-            + "\n\nRun [bold]notebooklm-mcp-2026 login[/bold] to authenticate again.",
-            title="[green]Logout[/green]",
-            border_style=SUCCESS_COLOR,
-            box=box.ROUNDED,
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                "[green bold]Logged out.[/green bold]\n\n"
+                + "\n".join(f"  Removed: [dim]{r}[/dim]" for r in removed)
+                + "\n\nRun [bold]notebooklm-mcp-2026 login[/bold] to authenticate again.",
+                title="[green]Logout[/green]",
+                border_style=SUCCESS_COLOR,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
     else:
         console.print("[dim]No credentials found — already logged out.[/dim]")
 
@@ -896,7 +914,9 @@ def handle_help() -> None:
 
     console.print(table)
     console.print()
-    console.print("[bold]Getting started?[/bold] Run [bold cyan]notebooklm-mcp-2026 setup[/bold cyan]")
+    console.print(
+        "[bold]Getting started?[/bold] Run [bold cyan]notebooklm-mcp-2026 setup[/bold cyan]"
+    )
     console.print()
     console.print("[dim]More info: https://github.com/julianoczkowski/notebooklm-mcp-2026[/dim]")
 
@@ -932,7 +952,19 @@ def main() -> None:
     )
     login_parser.add_argument(
         "--browser",
-        choices=("auto", "helium", "chrome", "edge", "brave", "chromium", "opera", "vivaldi", "firefox", "librewolf", "safari"),
+        choices=(
+            "auto",
+            "helium",
+            "chrome",
+            "edge",
+            "brave",
+            "chromium",
+            "opera",
+            "vivaldi",
+            "firefox",
+            "librewolf",
+            "safari",
+        ),
         default=None,
         help="Browser for import/cdp (default: try all, or NOTEBOOKLM_BROWSER env var)",
     )
@@ -967,7 +999,9 @@ def main() -> None:
     setup_parser = subparsers.add_parser("setup", help="Interactive setup wizard")
     setup_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     setup_parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would be configured without making changes"
+        "--dry-run",
+        action="store_true",
+        help="Show what would be configured without making changes",
     )
 
     # status

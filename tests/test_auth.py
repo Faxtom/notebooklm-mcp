@@ -52,8 +52,10 @@ class TestSaveLoadTokens:
         auth_file = tmp_path / "auth.json"
         tokens = AuthTokens(cookies=sample_cookies, csrf_token="csrf123")
 
-        with patch("notebooklm_mcp_2026.auth.AUTH_FILE", auth_file), \
-             patch("notebooklm_mcp_2026.auth.STORAGE_DIR", tmp_path):
+        with (
+            patch("notebooklm_mcp_2026.auth.AUTH_FILE", auth_file),
+            patch("notebooklm_mcp_2026.auth.STORAGE_DIR", tmp_path),
+        ):
             save_tokens(tokens)
             loaded = load_tokens()
 
@@ -65,8 +67,10 @@ class TestSaveLoadTokens:
         auth_file = tmp_path / "auth.json"
         tokens = AuthTokens(cookies=sample_cookies)
 
-        with patch("notebooklm_mcp_2026.auth.AUTH_FILE", auth_file), \
-             patch("notebooklm_mcp_2026.auth.STORAGE_DIR", tmp_path):
+        with (
+            patch("notebooklm_mcp_2026.auth.AUTH_FILE", auth_file),
+            patch("notebooklm_mcp_2026.auth.STORAGE_DIR", tmp_path),
+        ):
             save_tokens(tokens)
 
         if os.name != "nt":  # Skip on Windows
@@ -130,10 +134,14 @@ class TestImportCookiesFromFile:
 
     def test_devtools_list_format(self, tmp_path):
         path = tmp_path / "cookies.json"
-        path.write_text(json.dumps([
-            {"name": "SID", "value": "abc"},
-            {"name": "HSID", "value": "def"},
-        ]))
+        path.write_text(
+            json.dumps(
+                [
+                    {"name": "SID", "value": "abc"},
+                    {"name": "HSID", "value": "def"},
+                ]
+            )
+        )
         with patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies") as mock_build:
             mock_build.return_value = AuthTokens(cookies={"SID": "abc"})
             import_cookies_from_file(path)
@@ -168,8 +176,10 @@ class TestHeliumSupport:
     def test_user_data_dir_windows(self):
         from notebooklm_mcp_2026.auth import helium_user_data_dir
 
-        with patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\Test\AppData\Local"}), \
-             patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"):
+        with (
+            patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\Test\AppData\Local"}),
+            patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"),
+        ):
             path = helium_user_data_dir()
         assert path == Path(r"C:\Users\Test\AppData\Local\imput\Helium\User Data")
 
@@ -204,8 +214,10 @@ class TestHeliumSupport:
         exe = app / "chrome.exe"
         exe.write_text("")
 
-        with patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}), \
-             patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"):
+        with (
+            patch.dict(os.environ, {"LOCALAPPDATA": str(tmp_path)}),
+            patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"),
+        ):
             found = _helium_executable_candidates()
 
         assert str(exe) in [str(p) for p in found]
@@ -248,8 +260,10 @@ class TestBrowserSupport:
     def test_chromium_detected_on_windows_playwright(self):
         from notebooklm_mcp_2026.auth import get_browser_executable
 
-        with patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"), \
-             patch.object(Path, "exists", return_value=True):
+        with (
+            patch("notebooklm_mcp_2026.auth.platform.system", return_value="Windows"),
+            patch.object(Path, "exists", return_value=True),
+        ):
             path = get_browser_executable("chromium")
         assert path is not None
 

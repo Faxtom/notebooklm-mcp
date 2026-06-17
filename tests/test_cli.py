@@ -17,9 +17,7 @@ class TestMergeConfig:
 
     def test_create_new_file(self, tmp_path: Path) -> None:
         config_path = tmp_path / "mcp.json"
-        ok, msg = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "test"}
-        )
+        ok, msg = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "test"})
         assert ok
         assert "Added" in msg
 
@@ -28,16 +26,10 @@ class TestMergeConfig:
 
     def test_preserve_existing_servers(self, tmp_path: Path) -> None:
         config_path = tmp_path / "mcp.json"
-        existing = {
-            "mcpServers": {
-                "other-server": {"command": "other", "args": ["--flag"]}
-            }
-        }
+        existing = {"mcpServers": {"other-server": {"command": "other", "args": ["--flag"]}}}
         config_path.write_text(json.dumps(existing))
 
-        ok, _ = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "test"}
-        )
+        ok, _ = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "test"})
         assert ok
 
         data = json.loads(config_path.read_text())
@@ -50,9 +42,7 @@ class TestMergeConfig:
         existing = {"permissions": {"allow": []}, "model": "opus"}
         config_path.write_text(json.dumps(existing))
 
-        ok, _ = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "test"}
-        )
+        ok, _ = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "test"})
         assert ok
 
         data = json.loads(config_path.read_text())
@@ -65,9 +55,7 @@ class TestMergeConfig:
         existing = {"mcpServers": {"test-server": {"command": "old"}}}
         config_path.write_text(json.dumps(existing))
 
-        ok, msg = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "new"}
-        )
+        ok, msg = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "new"})
         assert ok
         assert "Updated" in msg
 
@@ -78,9 +66,7 @@ class TestMergeConfig:
         config_path = tmp_path / "mcp.json"
         config_path.write_text("not valid json{{{")
 
-        ok, msg = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "test"}
-        )
+        ok, msg = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "test"})
         assert not ok
         assert "Corrupt" in msg
         assert (tmp_path / "mcp.json.backup").exists()
@@ -90,9 +76,7 @@ class TestMergeConfig:
         existing = {"servers": {"github": {"url": "https://example.com"}}}
         config_path.write_text(json.dumps(existing))
 
-        ok, _ = merge_mcp_config(
-            config_path, "servers", "test-server", {"command": "test"}
-        )
+        ok, _ = merge_mcp_config(config_path, "servers", "test-server", {"command": "test"})
         assert ok
 
         data = json.loads(config_path.read_text())
@@ -103,17 +87,13 @@ class TestMergeConfig:
         config_path = tmp_path / "mcp.json"
         config_path.write_text("")
 
-        ok, msg = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "test"}
-        )
+        ok, msg = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "test"})
         assert ok
         assert "Added" in msg
 
     def test_creates_parent_directories(self, tmp_path: Path) -> None:
         config_path = tmp_path / "nested" / "dir" / "mcp.json"
-        ok, _ = merge_mcp_config(
-            config_path, "mcpServers", "test-server", {"command": "test"}
-        )
+        ok, _ = merge_mcp_config(config_path, "mcpServers", "test-server", {"command": "test"})
         assert ok
         assert config_path.exists()
 

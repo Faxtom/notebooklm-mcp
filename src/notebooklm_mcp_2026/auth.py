@@ -744,7 +744,9 @@ def _launch_chromium(
         if exit_code == 0 and _get_debugger_ws_url(port):
             # Windows launcher exited but the browser child is alive and
             # CDP is already responding — continue normally.
-            logger.debug("Chrome launcher exited (code 0) but CDP is live — Windows multi-process mode.")
+            logger.debug(
+                "Chrome launcher exited (code 0) but CDP is live — Windows multi-process mode."
+            )
         else:
             stderr_bytes = process.stderr.read() if process.stderr else b""
             stderr_text = stderr_bytes.decode(errors="replace").strip()
@@ -977,9 +979,7 @@ def extract_cookies_via_cdp(
             on_manual_launch_needed(port, _get_chrome_launch_args(port, headless=headless))
             _wait_for_cdp_connection(port, login_timeout)
         else:
-            raise RuntimeError(
-                "Google Chrome not found. Install Chrome or use --chrome-path."
-            )
+            raise RuntimeError("Google Chrome not found. Install Chrome or use --chrome-path.")
 
         # Find the NotebookLM page
         page = _find_notebooklm_page(port)
@@ -1074,7 +1074,9 @@ def _find_notebooklm_page(port: int, max_attempts: int = 5) -> dict | None:
 
         # CDP not ready yet — wait and retry
         if attempt < max_attempts - 1:
-            logger.debug("CDP not ready yet (attempt %d/%d), retrying...", attempt + 1, max_attempts)
+            logger.debug(
+                "CDP not ready yet (attempt %d/%d), retrying...", attempt + 1, max_attempts
+            )
             time.sleep(2)
 
     return None
