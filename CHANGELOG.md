@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-06-18
+
+### Fixed
+- Helium multi-profile support: use `profile.last_used` from Local State (not always `Default`)
+- CDP launcher passes `--profile-directory` for the active Helium profile
+- CDP cookie import scans all open tabs/profiles and picks the best Google session
+
+### Added
+- `NOTEBOOKLM_HELIUM_PROFILE` env var to force a specific Helium profile (e.g. `Profile 1`)
+
 ## [0.3.6] - 2026-06-18
 
 ### Fixed

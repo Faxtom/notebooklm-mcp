@@ -551,14 +551,23 @@ def _run_login(
         _show_login_success(tokens)
         return
 
-    from .auth import BROWSER_META, _find_cdp_port, _normalize_browser_name
+    from .auth import BROWSER_META, _find_cdp_port, _normalize_browser_name, helium_profile_label, helium_resolve_profile_name
 
     if method == "auto" and _find_cdp_port():
         browser_slug = _normalize_browser_name(browser) if browser else "helium"
         label = BROWSER_META[browser_slug]["label"]
+        profile_line = ""
+        if browser_slug == "helium":
+            profile = helium_resolve_profile_name()
+            if profile:
+                profile_line = (
+                    f"\n[dim]Helium profile: {helium_profile_label(profile)} "
+                    "(override with NOTEBOOKLM_HELIUM_PROFILE)[/dim]\n"
+                )
         console.print(
             Panel(
-                f"[yellow]CDP is active on {label}, but you are not signed in to Google.[/yellow]\n\n"
+                f"[yellow]CDP is active on {label}, but you are not signed in to Google.[/yellow]\n"
+                f"{profile_line}\n"
                 "1. In that same browser window, open "
                 "[bold]https://notebooklm.google.com[/bold]\n"
                 "2. Sign in with your Google account\n"
@@ -816,22 +825,35 @@ def handle_enable_cdp(browser: str = "helium", port: int = 9222) -> None:
     """Create a desktop launcher that starts the browser with CDP enabled."""
     show_banner()
     console.print()
-    from .auth import BROWSER_META, _find_cdp_port, enable_cdp_launcher
+    from .auth import BROWSER_META, _find_cdp_port, enable_cdp_launcher, helium_profile_label, helium_resolve_profile_name
 
     existing = _find_cdp_port()
     if existing is not None:
+        profile_msg = ""
+        if browser == "helium":
+            profile = helium_resolve_profile_name()
+            if profile:
+                profile_msg = f" Profile: {helium_profile_label(profile)}."
         console.print(
-            f"[green]CDP already active on port {existing}.[/green] "
+            f"[green]CDP already active on port {existing}.[/green]{profile_msg} "
             "Cookie import should work while the browser stays open."
         )
         return
 
     launcher = enable_cdp_launcher(browser=browser, port=port)
     label = BROWSER_META[browser]["label"]
+    profile_line = ""
+    if browser == "helium":
+        profile = helium_resolve_profile_name()
+        if profile:
+            profile_line = (
+                f"\nHelium profile: [bold]{helium_profile_label(profile)}[/bold] "
+                "(from last_used; set NOTEBOOKLM_HELIUM_PROFILE to override)"
+            )
     console.print(
         Panel(
             f"[green bold]Launcher created[/green bold]\n\n"
-            f"Path: [bold]{launcher}[/bold]\n\n"
+            f"Path: [bold]{launcher}[/bold]{profile_line}\n\n"
             f"1. [bold]Close every normal {label} window[/bold] (Task Manager if needed)\n"
             f"2. Double-click the launcher above — it closes old Helium and starts CDP\n"
             f"3. Wait for [green][OK] CDP active[/green] in the launcher window\n"

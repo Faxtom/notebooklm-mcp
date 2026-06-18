@@ -200,13 +200,45 @@ class TestHeliumSupport:
         profile.mkdir(parents=True)
         cookies = profile / "Cookies"
         cookies.write_bytes(b"sqlite")
-        (user_data / "Local State").write_text("{}")
+        (user_data / "Local State").write_text('{"profile":{"last_used":"Default"}}')
 
         with patch("notebooklm_mcp_2026.auth.helium_user_data_dir", return_value=user_data):
             paths = helium_cookie_db_paths()
 
         assert paths is not None
         assert paths[0] == cookies
+
+    def test_helium_resolve_profile_last_used(self, tmp_path):
+        from notebooklm_mcp_2026.auth import helium_resolve_profile_name
+
+        user_data = tmp_path / "User Data"
+        for name in ("Default", "Profile 2"):
+            net = user_data / name / "Network"
+            net.mkdir(parents=True)
+            (net / "Cookies").write_bytes(b"sqlite")
+        (user_data / "Local State").write_text(
+            json.dumps({"profile": {"last_used": "Profile 2", "info_cache": {}}})
+        )
+
+        with patch("notebooklm_mcp_2026.auth.helium_user_data_dir", return_value=user_data):
+            assert helium_resolve_profile_name() == "Profile 2"
+
+    def test_helium_profile_env_override(self, tmp_path):
+        from notebooklm_mcp_2026.auth import helium_resolve_profile_name
+
+        user_data = tmp_path / "User Data"
+        net = user_data / "Profile 1" / "Network"
+        net.mkdir(parents=True)
+        (net / "Cookies").write_bytes(b"sqlite")
+        (user_data / "Local State").write_text(
+            json.dumps({"profile": {"last_used": "Profile 2"}})
+        )
+
+        with (
+            patch("notebooklm_mcp_2026.auth.helium_user_data_dir", return_value=user_data),
+            patch.dict(os.environ, {"NOTEBOOKLM_HELIUM_PROFILE": "Profile 1"}),
+        ):
+            assert helium_resolve_profile_name() == "Profile 1"
 
     def test_executable_candidates_versioned(self, tmp_path):
         from notebooklm_mcp_2026.auth import _helium_executable_candidates

@@ -129,10 +129,18 @@ def build_tokens_from_cookies(cookies: dict[str, str]) -> AuthTokens:
         missing = REQUIRED_COOKIES - filtered.keys()
         hint = "Log in to https://notebooklm.google.com in your browser first."
         if _find_cdp_port(timeout=0.3):
+            profile = helium_resolve_profile_name()
+            profile_hint = ""
+            if profile:
+                profile_hint = (
+                    f" Using Helium profile {helium_profile_label(profile)}. "
+                    "If you use another profile, set NOTEBOOKLM_HELIUM_PROFILE "
+                    "and re-run enable-cdp."
+                )
             hint = (
-                "CDP is connected but you are not signed in to Google. "
+                "CDP is connected but this Helium profile is not signed in to Google. "
                 "Open https://notebooklm.google.com in that browser window, "
-                "complete login, then run login again."
+                f"complete login, then run login again.{profile_hint}"
             )
         raise RuntimeError(
             f"Missing required Google cookies: {', '.join(sorted(missing))}. {hint}"
@@ -213,8 +221,107 @@ def helium_user_data_dir() -> Path:
     return Path.home() / ".config" / "helium"
 
 
-def helium_cookie_db_paths() -> tuple[Path, Path] | None:
-    """Return ``(cookies_db, local_state)`` for Helium's default profile."""
+def helium_list_profiles() -> list[dict[str, str]]:
+    """List Helium Chromium profiles with display names from Local State."""
+    user_data = helium_user_data_dir()
+    if not user_data.is_dir():
+        return []
+
+    names: dict[str, str] = {}
+    local_state = user_data / "Local State"
+    if local_state.is_file():
+        try:
+            data = json.loads(local_state.read_text(encoding="utf-8"))
+            info = data.get("profile", {}).get("info_cache", {})
+            if isinstance(info, dict):
+                for profile_id, meta in info.items():
+                    if isinstance(meta, dict):
+                        names[profile_id] = str(meta.get("name") or profile_id)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    profiles: list[dict[str, str]] = []
+    for profile_dir in sorted(user_data.iterdir()):
+        if not profile_dir.is_dir():
+            continue
+        if profile_dir.name not in ("Default",) and not profile_dir.name.startswith("Profile "):
+            continue
+        cookie_file = profile_dir / "Network" / "Cookies"
+        if not cookie_file.is_file():
+            cookie_file = profile_dir / "Cookies"
+        if not cookie_file.is_file():
+            continue
+        profiles.append(
+            {
+                "id": profile_dir.name,
+                "name": names.get(profile_dir.name, profile_dir.name),
+            }
+        )
+    return profiles
+
+
+def helium_resolve_profile_name() -> str | None:
+    """Resolve which Helium profile to use for cookie import / CDP launch.
+
+    Priority:
+    1. ``NOTEBOOKLM_HELIUM_PROFILE`` environment variable
+    2. Chromium ``profile.last_used`` from Local State
+    3. ``Default``, then first ``Profile *`` directory with cookies
+    """
+    override = os.environ.get("NOTEBOOKLM_HELIUM_PROFILE", "").strip()
+    user_data = helium_user_data_dir()
+    if not user_data.is_dir():
+        return override or None
+
+    if override:
+        if (user_data / override).is_dir():
+            return override
+        raise RuntimeError(
+            f"Helium profile '{override}' not found. "
+            f"Set NOTEBOOKLM_HELIUM_PROFILE to one of: "
+            f"{', '.join(p['id'] for p in helium_list_profiles()) or 'none detected'}"
+        )
+
+    local_state = user_data / "Local State"
+    if local_state.is_file():
+        try:
+            data = json.loads(local_state.read_text(encoding="utf-8"))
+            last_used = data.get("profile", {}).get("last_used")
+            if isinstance(last_used, str) and (user_data / last_used).is_dir():
+                return last_used
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    for candidate in ("Default",):
+        if (user_data / candidate / "Network" / "Cookies").is_file() or (
+            user_data / candidate / "Cookies"
+        ).is_file():
+            return candidate
+
+    for profile_dir in sorted(user_data.glob("Profile *")):
+        if (profile_dir / "Network" / "Cookies").is_file() or (
+            profile_dir / "Cookies"
+        ).is_file():
+            return profile_dir.name
+
+    return None
+
+
+def helium_profile_label(profile_id: str | None) -> str:
+    """Human-readable label for a Helium profile id."""
+    if not profile_id:
+        return "unknown"
+    for profile in helium_list_profiles():
+        if profile["id"] == profile_id:
+            name = profile["name"]
+            if name != profile_id:
+                return f"{name} ({profile_id})"
+            return profile_id
+    return profile_id
+
+
+def helium_cookie_db_paths(profile: str | None = None) -> tuple[Path, Path] | None:
+    """Return ``(cookies_db, local_state)`` for a Helium Chromium profile."""
     user_data = helium_user_data_dir()
     if not user_data.is_dir():
         return None
@@ -223,19 +330,15 @@ def helium_cookie_db_paths() -> tuple[Path, Path] | None:
     if not key_file.is_file():
         return None
 
-    default_profile = user_data / "Default"
-    for cookie_file in (
-        default_profile / "Network" / "Cookies",
-        default_profile / "Cookies",
-    ):
+    profile_name = profile or helium_resolve_profile_name()
+    if not profile_name:
+        return None
+
+    profile_dir = user_data / profile_name
+    for rel in ("Network/Cookies", "Cookies"):
+        cookie_file = profile_dir / rel
         if cookie_file.is_file():
             return cookie_file, key_file
-
-    for profile_dir in sorted(user_data.glob("Profile *")):
-        for rel in ("Network/Cookies", "Cookies"):
-            cookie_file = profile_dir / rel
-            if cookie_file.is_file():
-                return cookie_file, key_file
 
     return None
 
@@ -1005,6 +1108,13 @@ def enable_cdp_launcher(browser: str = "helium", port: int = CDP_PORT_START) -> 
     if system == "Windows":
         launcher = Path.home() / "Desktop" / f"{label} (MCP debug).cmd"
         exe = executable.replace("%", "%%")
+        profile_arg = ""
+        profile_note = ""
+        if name == "helium":
+            profile = helium_resolve_profile_name()
+            if profile:
+                profile_arg = f' --profile-directory="{profile}"'
+                profile_note = f"Profile: {helium_profile_label(profile)}"
         kill_block = ""
         if name == "helium":
             kill_block = (
@@ -1020,8 +1130,10 @@ def enable_cdp_launcher(browser: str = "helium", port: int = CDP_PORT_START) -> 
             "setlocal\n"
             f"{kill_block}"
             f"echo [{label} MCP] Starting with remote debugging on port {port}...\n"
-            f'start "{label} MCP Debug" "{exe}" '
-            f"--remote-debugging-port={port} --remote-allow-origins=* --no-first-run\n"
+            + (f"echo [{label} MCP] {profile_note}\n" if profile_note else "")
+            + f'start "{label} MCP Debug" "{exe}"'
+            f" --remote-debugging-port={port}{profile_arg}"
+            f" --remote-allow-origins=* --no-first-run\n"
             "timeout /t 2 /nobreak >nul\n"
             f"curl -s http://127.0.0.1:{port}/json/version >nul 2>&1\n"
             "if errorlevel 1 (\n"
@@ -1109,27 +1221,48 @@ def _find_cdp_page_ws(port: int) -> str | None:
     return None
 
 
+def _best_cdp_cookies_from_pages(port: int) -> dict[str, str]:
+    """Try every open tab; return the richest valid Google cookie set."""
+    best: dict[str, str] = {}
+    best_required = 0
+
+    for page in _get_pages(port):
+        ws_url = page.get("webSocketDebuggerUrl")
+        if not ws_url:
+            continue
+        try:
+            url = page.get("url", "")
+            if "notebooklm.google.com" not in url:
+                _navigate_to_url(ws_url, NOTEBOOKLM_URL)
+                time.sleep(2)
+            extracted = filter_essential_cookies(_extract_cookies_from_ws(ws_url))
+            required_count = len(REQUIRED_COOKIES & extracted.keys())
+            if required_count > best_required:
+                best = extracted
+                best_required = required_count
+            if validate_cookies(extracted):
+                return extracted
+        except Exception as exc:
+            logger.debug("CDP cookie import failed for page %s: %s", page.get("url"), exc)
+
+    return best
+
+
 def _collect_cdp_cookies(port: int) -> dict[str, str]:
-    """Merge cookies from browser-level and page-level CDP targets."""
-    cookies: dict[str, str] = {}
+    """Merge cookies from all CDP targets, preferring logged-in profiles."""
+    cookies = _best_cdp_cookies_from_pages(port)
+    if validate_cookies(cookies):
+        return cookies
 
     browser_ws = _get_debugger_ws_url(port)
     if browser_ws:
         try:
-            cookies.update(_extract_cookies_from_ws(browser_ws))
+            browser_cookies = filter_essential_cookies(_extract_cookies_from_ws(browser_ws))
+            required_count = len(REQUIRED_COOKIES & browser_cookies.keys())
+            if required_count > len(REQUIRED_COOKIES & cookies.keys()):
+                cookies = browser_cookies
         except Exception as exc:
             logger.debug("Browser-level CDP cookie import failed: %s", exc)
-
-    page_ws = _find_cdp_page_ws(port)
-    if page_ws:
-        try:
-            current_url = _get_current_url(page_ws)
-            if "notebooklm.google.com" not in current_url:
-                _navigate_to_url(page_ws, NOTEBOOKLM_URL)
-                time.sleep(2)
-            cookies.update(_extract_cookies_from_ws(page_ws))
-        except Exception as exc:
-            logger.debug("Page-level CDP cookie import failed: %s", exc)
 
     return cookies
 

@@ -1,3 +1,3 @@
 """notebooklm-mcp-2026: Secure MCP server for querying Google NotebookLM notebooks."""
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"

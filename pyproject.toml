@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "notebooklm-mcp-faxtom"
-version = "0.3.6"
+version = "0.3.7"
 description = "Secure MCP server for querying Google NotebookLM notebooks"
 readme = "README.md"
 license = "MIT"
