@@ -224,8 +224,9 @@ class TestHeliumSupport:
 
         assert str(exe) in [str(p) for p in found]
 
+    @patch("notebooklm_mcp_2026.auth._try_load_cookies_via_running_cdp", return_value=None)
     @patch("notebooklm_mcp_2026.auth.helium_cookie_db_paths")
-    def test_load_helium_cookies(self, mock_paths, sample_cookies):
+    def test_load_helium_cookies(self, mock_paths, _mock_cdp, sample_cookies):
         mock_paths.return_value = (Path("/fake/Cookies"), Path("/fake/Local State"))
         cookie = MagicMock()
         cookie.name = "SID"
@@ -240,7 +241,33 @@ class TestHeliumSupport:
         assert cookies["SID"] == sample_cookies["SID"]
         mock_chrome.assert_called_once()
 
-    @patch("notebooklm_mcp_2026.auth._load_helium_cookies")
+    @patch("notebooklm_mcp_2026.auth._try_load_cookies_via_running_cdp")
+    def test_load_helium_cookies_prefers_cdp(self, mock_cdp, sample_cookies):
+        mock_cdp.return_value = sample_cookies
+
+        from notebooklm_mcp_2026.auth import _load_helium_cookies
+
+        cookies = _load_helium_cookies()
+        assert cookies == sample_cookies
+        mock_cdp.assert_called_once()
+
+    @patch("notebooklm_mcp_2026.auth._try_load_cookies_via_running_cdp", return_value=None)
+    @patch("notebooklm_mcp_2026.auth.helium_cookie_db_paths")
+    def test_load_helium_cookies_locked_hint(self, mock_paths, _mock_cdp):
+        mock_paths.return_value = (Path("/fake/Cookies"), Path("/fake/Local State"))
+
+        class FakeAdminError(Exception):
+            pass
+
+        import browser_cookie3
+
+        with patch.object(browser_cookie3, "chrome", side_effect=FakeAdminError("requires admin")):
+            from notebooklm_mcp_2026.auth import _load_helium_cookies
+
+            with pytest.raises(RuntimeError, match="enable-cdp"):
+                _load_helium_cookies()
+
+    @patch("notebooklm_mcp_2026.auth._load_cookies_with_browser_cookie3")
     @patch("notebooklm_mcp_2026.auth.build_tokens_from_cookies")
     def test_extract_helium_browser(self, mock_build, mock_load, sample_cookies):
         mock_load.return_value = sample_cookies
@@ -249,7 +276,7 @@ class TestHeliumSupport:
         from notebooklm_mcp_2026.auth import extract_cookies_from_browser
 
         extract_cookies_from_browser(browser="helium")
-        mock_load.assert_called_once()
+        mock_load.assert_called_once_with("helium")
 
 
 class TestBrowserSupport:

@@ -171,6 +171,31 @@ def build_tokens_from_cookies(cookies: dict[str, str]) -> AuthTokens:
 
 _last_silent_refresh: float = 0.0
 
+# Shown when the on-disk cookie DB is locked (browser open on Windows).
+_CDP_COOKIE_IMPORT_HINT = (
+    "On Windows the browser locks its cookie database while it is running. "
+    "To import cookies without closing it, restart the browser once with "
+    "--remote-debugging-port=9222 (or set NOTEBOOKLM_CDP_PORT), then retry. "
+    "Run: notebooklm-mcp-2026 enable-cdp --browser helium"
+)
+
+
+def _cookie_db_locked_error(exc: BaseException) -> bool:
+    """Return True when *exc* indicates the Chromium cookie DB cannot be read."""
+    name = type(exc).__name__
+    if name in ("RequiresAdminError", "PermissionError", "BrowserCookieError"):
+        return True
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in (
+            "being used by another process",
+            "utilizado por otro proceso",
+            "unable to read database",
+            "requires admin",
+        )
+    )
+
 
 def helium_user_data_dir() -> Path:
     """Default Helium profile directory (https://github.com/imputnet/helium)."""
@@ -230,8 +255,8 @@ def _helium_executable_candidates() -> list[Path]:
     return candidates
 
 
-def _load_helium_cookies() -> dict[str, str]:
-    """Import Google cookies from Helium's Chromium profile."""
+def _load_helium_cookies_from_disk() -> dict[str, str]:
+    """Import Google cookies from Helium's on-disk Chromium profile."""
     import browser_cookie3
 
     paths = helium_cookie_db_paths()
@@ -249,6 +274,11 @@ def _load_helium_cookies() -> dict[str, str]:
             key_file=str(key_file),
         )
     except Exception as exc:
+        if _cookie_db_locked_error(exc):
+            raise RuntimeError(
+                "Could not read Helium cookies while Helium is open.\n"
+                f"{_CDP_COOKIE_IMPORT_HINT}\n({exc})"
+            ) from exc
         raise RuntimeError(
             "Could not read Helium cookies. Close Helium completely and try again, "
             f"or use: notebooklm-mcp-2026 login --method cdp --browser helium\n({exc})"
@@ -262,6 +292,15 @@ def _load_helium_cookies() -> dict[str, str]:
     return cookies
 
 
+def _load_helium_cookies() -> dict[str, str]:
+    """Import Google cookies from Helium (CDP while open, else on-disk profile)."""
+    cookies = _try_load_cookies_via_running_cdp()
+    if cookies is not None:
+        logger.info("Imported Helium cookies via CDP (browser can stay open).")
+        return cookies
+    return _load_helium_cookies_from_disk()
+
+
 def _load_cookies_with_browser_cookie3(browser: str) -> dict[str, str]:
     """Load Google cookies from a specific browser profile via browser_cookie3."""
     try:
@@ -272,8 +311,17 @@ def _load_cookies_with_browser_cookie3(browser: str) -> dict[str, str]:
         ) from exc
 
     name = _normalize_browser_name(browser)
+    if BROWSER_META[name]["cdp"]:
+        cookies = _try_load_cookies_via_running_cdp()
+        if cookies is not None:
+            logger.info(
+                "Imported cookies via CDP for %s (browser can stay open).",
+                BROWSER_META[name]["label"],
+            )
+            return cookies
+
     if name == "helium":
-        return _load_helium_cookies()
+        return _load_helium_cookies_from_disk()
 
     loader_name = BROWSER_META[name]["cookie3"]
     loader = getattr(browser_cookie3, loader_name, None)
@@ -284,6 +332,11 @@ def _load_cookies_with_browser_cookie3(browser: str) -> dict[str, str]:
     try:
         jar = loader(domain_name=".google.com")
     except Exception as exc:
+        if BROWSER_META[name]["cdp"] and _cookie_db_locked_error(exc):
+            raise RuntimeError(
+                f"Could not read {label} cookies while the browser is open.\n"
+                f"{_CDP_COOKIE_IMPORT_HINT}\n({exc})"
+            ) from exc
         raise RuntimeError(
             f"Could not read {label} cookies. Close the browser completely and try again "
             f"or use --method cdp with a Chromium browser.\n({exc})"
@@ -773,15 +826,107 @@ _launch_chrome = _launch_chromium
 # ---------------------------------------------------------------------------
 
 
-def _get_debugger_ws_url(port: int) -> str | None:
+def _get_debugger_ws_url(port: int, *, timeout: float = 5.0) -> str | None:
     """Get the browser-level WebSocket debugger URL."""
     import httpx
 
     try:
-        resp = httpx.get(f"http://localhost:{port}/json/version", timeout=5)
+        resp = httpx.get(f"http://localhost:{port}/json/version", timeout=timeout)
         return resp.json().get("webSocketDebuggerUrl")
     except Exception:
         return None
+
+
+def _cdp_ports_to_try() -> list[int]:
+    """Ports to probe for a running Chromium browser with CDP enabled."""
+    ports: list[int] = []
+    env_port = os.environ.get("NOTEBOOKLM_CDP_PORT", "").strip()
+    if env_port:
+        for part in env_port.split(","):
+            part = part.strip()
+            if part.isdigit():
+                ports.append(int(part))
+    for offset in range(CDP_PORT_RANGE):
+        port = CDP_PORT_START + offset
+        if port not in ports:
+            ports.append(port)
+    return ports
+
+
+def _find_cdp_port(*, timeout: float = 0.4) -> int | None:
+    """Return the first localhost port that exposes a Chromium CDP endpoint."""
+    for port in _cdp_ports_to_try():
+        if _get_debugger_ws_url(port, timeout=timeout):
+            return port
+    return None
+
+
+def _try_load_cookies_via_running_cdp() -> dict[str, str] | None:
+    """Read Google cookies from a running Chromium browser via CDP.
+
+    Works while the browser is open, but the browser must have been started
+    with ``--remote-debugging-port`` (see ``enable_cdp_launcher``).
+    """
+    port = _find_cdp_port()
+    if port is None:
+        return None
+
+    ws_url = _get_debugger_ws_url(port)
+    if not ws_url:
+        pages = _get_pages(port)
+        if pages:
+            ws_url = pages[0].get("webSocketDebuggerUrl")
+    if not ws_url:
+        return None
+
+    try:
+        return _extract_cookies_from_ws(ws_url)
+    except Exception as exc:
+        logger.debug("CDP cookie import failed on port %s: %s", port, exc)
+        return None
+
+
+def enable_cdp_launcher(browser: str = "helium", port: int = CDP_PORT_START) -> Path:
+    """Create a launcher script that starts *browser* with remote debugging enabled.
+
+    The user must start the browser through this launcher (or an equivalent
+    shortcut) once so CDP cookie import works while the browser stays open.
+    """
+    name = _normalize_browser_name(browser)
+    if not BROWSER_META[name]["cdp"]:
+        raise ValueError(f"{BROWSER_META[name]['label']} does not support CDP.")
+
+    executable = get_browser_executable(name)
+    if not executable:
+        raise RuntimeError(f"{BROWSER_META[name]['label']} executable not found.")
+
+    label = BROWSER_META[name]["label"]
+    system = platform.system()
+
+    if system == "Windows":
+        launcher = Path.home() / "Desktop" / f"{label} (MCP debug).cmd"
+        content = (
+            "@echo off\n"
+            f'start "" "{executable}" --remote-debugging-port={port}\n'
+        )
+        launcher.write_text(content, encoding="utf-8")
+        return launcher
+
+    if system == "Darwin":
+        launcher = Path.home() / "Desktop" / f"{label} (MCP debug).command"
+        content = (
+            "#!/bin/bash\n"
+            f'exec "{executable}" --remote-debugging-port={port}\n'
+        )
+        launcher.write_text(content, encoding="utf-8")
+        launcher.chmod(0o755)
+        return launcher
+
+    launcher = Path.home() / f"{name}-mcp-debug.sh"
+    content = f'#!/bin/sh\nexec "{executable}" --remote-debugging-port={port}\n'
+    launcher.write_text(content, encoding="utf-8")
+    launcher.chmod(0o755)
+    return launcher
 
 
 def _get_pages(port: int) -> list[dict]:

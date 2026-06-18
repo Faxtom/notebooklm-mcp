@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-18
+
+### Added
+- CDP cookie import while Chromium browsers (Helium, Chrome, Edge, …) stay open on Windows
+- `notebooklm-mcp-2026 enable-cdp` — creates a desktop launcher with `--remote-debugging-port=9222`
+- `NOTEBOOKLM_CDP_PORT` for custom CDP ports during silent refresh
+
+### Fixed
+- Clear error when the cookie database is locked (browser open) instead of a generic admin/shadowcopy failure
+
 ## [0.3.2] - 2026-06-18
 
 ### Changed

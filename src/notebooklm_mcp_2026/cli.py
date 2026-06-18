@@ -789,6 +789,40 @@ def handle_status() -> None:
     console.print(table)
 
 
+def handle_enable_cdp(browser: str = "helium", port: int = 9222) -> None:
+    """Create a desktop launcher that starts the browser with CDP enabled."""
+    show_banner()
+    console.print()
+    from .auth import BROWSER_META, _find_cdp_port, enable_cdp_launcher
+
+    existing = _find_cdp_port()
+    if existing is not None:
+        console.print(
+            f"[green]CDP already active on port {existing}.[/green] "
+            "Cookie import should work while the browser stays open."
+        )
+        return
+
+    launcher = enable_cdp_launcher(browser=browser, port=port)
+    label = BROWSER_META[browser]["label"]
+    console.print(
+        Panel(
+            f"[green bold]Launcher created[/green bold]\n\n"
+            f"Path: [bold]{launcher}[/bold]\n\n"
+            f"1. Close {label} if it is running\n"
+            f"2. Open {label} using the new launcher (not the normal shortcut)\n"
+            f"3. Log in to notebooklm.google.com as usual\n"
+            f"4. Run [bold]notebooklm-mcp-2026 login --browser {browser}[/bold] "
+            f"— cookies import while {label} stays open\n\n"
+            f"[dim]Port: {port} (override with NOTEBOOKLM_CDP_PORT)[/dim]",
+            title=f"[green]{label} CDP setup[/green]",
+            border_style=SUCCESS_COLOR,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
+
+
 def handle_doctor() -> None:
     """Diagnose common issues."""
     show_banner()
@@ -1012,6 +1046,24 @@ def main() -> None:
     doctor_parser = subparsers.add_parser("doctor", help="Diagnose common issues")
     doctor_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
+    # enable-cdp
+    enable_cdp_parser = subparsers.add_parser(
+        "enable-cdp",
+        help="Create a browser launcher with remote debugging (import cookies while open)",
+    )
+    enable_cdp_parser.add_argument(
+        "--browser",
+        default="helium",
+        help="Chromium browser to configure (default: helium)",
+    )
+    enable_cdp_parser.add_argument(
+        "--port",
+        type=int,
+        default=9222,
+        help="Remote debugging port (default: 9222)",
+    )
+    enable_cdp_parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+
     # version
     subparsers.add_parser("version", help="Print version and exit")
 
@@ -1043,6 +1095,9 @@ def main() -> None:
         handle_status()
     elif args.command == "doctor":
         handle_doctor()
+    elif args.command == "enable-cdp":
+        browser = None if args.browser in (None, "auto") else args.browser
+        handle_enable_cdp(browser=browser or "helium", port=args.port)
     elif args.command == "version":
         console.print(f"notebooklm-mcp-2026 {__version__}")
     elif args.command == "serve":
