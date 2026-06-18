@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "notebooklm-mcp-2026"
-version = "0.3.1"
+name = "notebooklm-mcp-faxtom"
+version = "0.3.2"
 description = "Secure MCP server for querying Google NotebookLM notebooks"
 readme = "README.md"
 license = "MIT"

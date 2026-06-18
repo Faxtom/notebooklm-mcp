@@ -3,7 +3,7 @@
 [![Google NotebookLM](https://img.shields.io/badge/Google-NotebookLM-4285F4)](https://notebooklm.google.com)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![FastMCP](https://img.shields.io/badge/built_with-FastMCP-ff6600)](https://github.com/jlowin/fastmcp)
-[![PyPI](https://img.shields.io/pypi/v/notebooklm-mcp-2026)](https://pypi.org/project/notebooklm-mcp-2026/)
+[![PyPI](https://img.shields.io/pypi/v/notebooklm-mcp-faxtom)](https://pypi.org/project/notebooklm-mcp-faxtom/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/julianoczkowski)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/julianoczkowski)
@@ -50,7 +50,7 @@ pip install -e .
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install notebooklm-mcp-2026
+uv tool install notebooklm-mcp-faxtom
 ```
 
 **Windows (PowerShell):**
@@ -117,11 +117,11 @@ Other install options:
 
 ```bash
 # pipx (if you already have it)
-pipx install notebooklm-mcp-2026
+pipx install notebooklm-mcp-faxtom
 
 # pip (inside a virtual environment)
 python -m venv .venv && source .venv/bin/activate
-pip install notebooklm-mcp-2026
+pip install notebooklm-mcp-faxtom
 
 # From source
 git clone https://github.com/Faxtom/notebooklm-mcp-2026.git

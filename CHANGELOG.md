@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-18
+
+### Changed
+- PyPI package renamed to `notebooklm-mcp-faxtom` (fork publish; upstream name owned by Julian)
+- CLI command remains `notebooklm-mcp-2026`
+
 ## [0.3.1] - 2026-06-17
 
 ### Fixed
