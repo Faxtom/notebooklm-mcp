@@ -809,11 +809,11 @@ def handle_enable_cdp(browser: str = "helium", port: int = 9222) -> None:
         Panel(
             f"[green bold]Launcher created[/green bold]\n\n"
             f"Path: [bold]{launcher}[/bold]\n\n"
-            f"1. Close {label} if it is running\n"
-            f"2. Open {label} using the new launcher (not the normal shortcut)\n"
-            f"3. Log in to notebooklm.google.com as usual\n"
-            f"4. Run [bold]notebooklm-mcp-2026 login --browser {browser}[/bold] "
-            f"— cookies import while {label} stays open\n\n"
+            f"1. [bold]Close every normal {label} window[/bold] (Task Manager if needed)\n"
+            f"2. Double-click the launcher above — it closes old Helium and starts CDP\n"
+            f"3. Wait for [green][OK] CDP active[/green] in the launcher window\n"
+            f"4. Log in to notebooklm.google.com in that {label} window\n"
+            f"5. Run [bold]notebooklm-mcp-2026 login --browser {browser}[/bold]\n\n"
             f"[dim]Port: {port} (override with NOTEBOOKLM_CDP_PORT)[/dim]",
             title=f"[green]{label} CDP setup[/green]",
             border_style=SUCCESS_COLOR,

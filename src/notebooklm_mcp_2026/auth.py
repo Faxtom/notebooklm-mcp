@@ -277,7 +277,7 @@ def _load_helium_cookies_from_disk() -> dict[str, str]:
         if _cookie_db_locked_error(exc):
             raise RuntimeError(
                 "Could not read Helium cookies while Helium is open.\n"
-                f"{_CDP_COOKIE_IMPORT_HINT}\n({exc})"
+                f"{_cdp_troubleshooting_hint('helium')}\n({exc})"
             ) from exc
         raise RuntimeError(
             "Could not read Helium cookies. Close Helium completely and try again, "
@@ -853,12 +853,103 @@ def _cdp_ports_to_try() -> list[int]:
     return ports
 
 
+def _chromium_user_data_dirs() -> list[Path]:
+    """Common Chromium profile roots to scan for DevToolsActivePort."""
+    dirs: list[Path] = [helium_user_data_dir()]
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    for rel in (
+        "Google/Chrome/User Data",
+        "Microsoft/Edge/User Data",
+        "BraveSoftware/Brave-Browser/User Data",
+    ):
+        path = local / rel
+        if path.is_dir():
+            dirs.append(path)
+    return dirs
+
+
+def _devtools_port_candidates() -> list[int]:
+    """Read DevToolsActivePort files written by Chromium when CDP is enabled."""
+    ports: list[int] = []
+    for user_data in _chromium_user_data_dirs():
+        port_file = user_data / "DevToolsActivePort"
+        if not port_file.is_file():
+            continue
+        try:
+            first_line = port_file.read_text(encoding="utf-8", errors="replace").splitlines()[0].strip()
+            port = int(first_line)
+            if port not in ports:
+                ports.append(port)
+        except (IndexError, ValueError, OSError):
+            continue
+    return ports
+
+
 def _find_cdp_port(*, timeout: float = 0.4) -> int | None:
     """Return the first localhost port that exposes a Chromium CDP endpoint."""
-    for port in _cdp_ports_to_try():
+    checked: set[int] = set()
+    for port in _cdp_ports_to_try() + _devtools_port_candidates():
+        if port in checked:
+            continue
+        checked.add(port)
         if _get_debugger_ws_url(port, timeout=timeout):
             return port
     return None
+
+
+def _helium_processes_running() -> bool:
+    """Return True if a Helium (imput) Chromium process appears to be running."""
+    if platform.system() != "Windows":
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "(Get-Process chrome -ErrorAction SilentlyContinue | "
+                    "Where-Object { $_.Path -like '*imput*Helium*' }).Count -gt 0"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return result.stdout.strip().lower() == "true"
+    except Exception:
+        return False
+
+
+def _cdp_troubleshooting_hint(browser: str = "helium") -> str:
+    """Actionable hint when on-disk cookie import fails because the browser is open."""
+    label = BROWSER_META.get(browser, {}).get("label", browser)
+    port = _find_cdp_port(timeout=0.5)
+    if port is not None:
+        return (
+            f"CDP is active on port {port} but cookie extraction failed. "
+            f"Open https://notebooklm.google.com in {label} and retry login."
+        )
+
+    lines = [
+        f"CDP is not active — {label} was not started with remote debugging.",
+        "",
+        "Fix:",
+        f"  1. Close ALL {label} windows (Task Manager → end chrome.exe under imput\\Helium)",
+        f"  2. Start {label} only via: Desktop\\{label} (MCP debug).cmd",
+        "  3. Verify: curl http://localhost:9222/json/version",
+        f"  4. Retry: notebooklm-mcp-2026 login --browser {browser}",
+        "",
+        "If you already use the debug launcher, re-run:",
+        f"  notebooklm-mcp-2026 enable-cdp --browser {browser}",
+    ]
+    if _helium_processes_running() and browser == "helium":
+        lines.insert(
+            2,
+            "  (Helium is running now, but without CDP — normal shortcut ignores debug flags.)",
+        )
+    return "\n".join(lines)
 
 
 def _try_load_cookies_via_running_cdp() -> dict[str, str] | None:
@@ -905,9 +996,33 @@ def enable_cdp_launcher(browser: str = "helium", port: int = CDP_PORT_START) -> 
 
     if system == "Windows":
         launcher = Path.home() / "Desktop" / f"{label} (MCP debug).cmd"
+        exe = executable.replace("%", "%%")
+        kill_block = ""
+        if name == "helium":
+            kill_block = (
+                f"echo [{label} MCP] Closing existing {label} processes...\n"
+                "powershell -NoProfile -Command \""
+                "Get-Process chrome -ErrorAction SilentlyContinue | "
+                "Where-Object { $_.Path -like '*imput*Helium*' } | "
+                "Stop-Process -Force\" 2>nul\n"
+                "timeout /t 2 /nobreak >nul\n"
+            )
         content = (
             "@echo off\n"
-            f'start "" "{executable}" --remote-debugging-port={port}\n'
+            "setlocal\n"
+            f"{kill_block}"
+            f"echo [{label} MCP] Starting with remote debugging on port {port}...\n"
+            f'start "{label} MCP Debug" "{exe}" '
+            f"--remote-debugging-port={port} --remote-allow-origins=* --no-first-run\n"
+            "timeout /t 2 /nobreak >nul\n"
+            f"curl -s http://127.0.0.1:{port}/json/version >nul 2>&1\n"
+            "if errorlevel 1 (\n"
+            "  echo.\n"
+            f"  echo [WARN] CDP port not responding. Close any normal {label} window and run this again.\n"
+            ") else (\n"
+            f"  echo [OK] CDP active on port {port}. Run: notebooklm-mcp-2026 login --browser {name}\n"
+            ")\n"
+            "pause\n"
         )
         launcher.write_text(content, encoding="utf-8")
         return launcher

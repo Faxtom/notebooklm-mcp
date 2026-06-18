@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-18
+
+### Fixed
+- Windows `enable-cdp` launcher now closes existing Helium processes before start so `--remote-debugging-port` is not ignored
+- Launcher verifies CDP on port 9222 and prints `[OK]` / `[WARN]` feedback
+
+### Changed
+- CDP port discovery also reads Chromium `DevToolsActivePort` files
+- Clearer troubleshooting when Helium is open but CDP is not active
+
 ## [0.3.3] - 2026-06-18
 
 ### Added
