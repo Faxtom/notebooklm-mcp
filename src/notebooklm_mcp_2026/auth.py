@@ -127,9 +127,15 @@ def build_tokens_from_cookies(cookies: dict[str, str]) -> AuthTokens:
     filtered = filter_essential_cookies(cookies)
     if not validate_cookies(filtered):
         missing = REQUIRED_COOKIES - filtered.keys()
+        hint = "Log in to https://notebooklm.google.com in your browser first."
+        if _find_cdp_port(timeout=0.3):
+            hint = (
+                "CDP is connected but you are not signed in to Google. "
+                "Open https://notebooklm.google.com in that browser window, "
+                "complete login, then run login again."
+            )
         raise RuntimeError(
-            f"Missing required Google cookies: {', '.join(sorted(missing))}. "
-            "Log in to https://notebooklm.google.com in your browser first."
+            f"Missing required Google cookies: {', '.join(sorted(missing))}. {hint}"
         )
 
     jar = httpx.Cookies()
@@ -962,19 +968,21 @@ def _try_load_cookies_via_running_cdp() -> dict[str, str] | None:
     if port is None:
         return None
 
-    ws_url = _get_debugger_ws_url(port)
-    if not ws_url:
-        pages = _get_pages(port)
-        if pages:
-            ws_url = pages[0].get("webSocketDebuggerUrl")
-    if not ws_url:
-        return None
-
     try:
-        return _extract_cookies_from_ws(ws_url)
+        cookies = _collect_cdp_cookies(port)
     except Exception as exc:
         logger.debug("CDP cookie import failed on port %s: %s", port, exc)
         return None
+
+    if not cookies:
+        return None
+
+    filtered = filter_essential_cookies(cookies)
+    if validate_cookies(filtered):
+        return filtered
+
+    # CDP connected but session cookies missing — let build_tokens_from_cookies explain
+    return cookies
 
 
 def enable_cdp_launcher(browser: str = "helium", port: int = CDP_PORT_START) -> Path:
@@ -1075,10 +1083,55 @@ def execute_cdp_command(ws_url: str, method: str, params: dict | None = None) ->
         ws.close()
 
 
+def _is_google_cookie_domain(domain: str) -> bool:
+    """Return True if *domain* is a Google auth cookie domain."""
+    normalized = domain.lstrip(".").lower()
+    return normalized == "google.com" or normalized.endswith(".google.com")
+
+
 def _get_page_cookies(ws_url: str) -> list[dict]:
     """Extract all cookies via ``Network.getAllCookies``."""
+    execute_cdp_command(ws_url, "Network.enable")
     result = execute_cdp_command(ws_url, "Network.getAllCookies")
     return result.get("cookies", [])
+
+
+def _find_cdp_page_ws(port: int) -> str | None:
+    """Return a page WebSocket, preferring an open NotebookLM tab."""
+    pages = _get_pages(port)
+    for page in pages:
+        if "notebooklm.google.com" in page.get("url", ""):
+            return page.get("webSocketDebuggerUrl")
+    for page in pages:
+        ws_url = page.get("webSocketDebuggerUrl")
+        if ws_url:
+            return ws_url
+    return None
+
+
+def _collect_cdp_cookies(port: int) -> dict[str, str]:
+    """Merge cookies from browser-level and page-level CDP targets."""
+    cookies: dict[str, str] = {}
+
+    browser_ws = _get_debugger_ws_url(port)
+    if browser_ws:
+        try:
+            cookies.update(_extract_cookies_from_ws(browser_ws))
+        except Exception as exc:
+            logger.debug("Browser-level CDP cookie import failed: %s", exc)
+
+    page_ws = _find_cdp_page_ws(port)
+    if page_ws:
+        try:
+            current_url = _get_current_url(page_ws)
+            if "notebooklm.google.com" not in current_url:
+                _navigate_to_url(page_ws, NOTEBOOKLM_URL)
+                time.sleep(2)
+            cookies.update(_extract_cookies_from_ws(page_ws))
+        except Exception as exc:
+            logger.debug("Page-level CDP cookie import failed: %s", exc)
+
+    return cookies
 
 
 def _get_page_html(ws_url: str) -> str:
@@ -1142,7 +1195,7 @@ def _extract_cookies_from_ws(ws_url: str) -> dict[str, str]:
     for c in raw:
         name = c.get("name", "")
         domain = c.get("domain", "")
-        if name in ESSENTIAL_COOKIES and ".google.com" in domain:
+        if name in ESSENTIAL_COOKIES and _is_google_cookie_domain(domain):
             cookies[name] = c.get("value", "")
     return cookies
 

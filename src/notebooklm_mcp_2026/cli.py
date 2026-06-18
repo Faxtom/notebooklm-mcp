@@ -526,8 +526,9 @@ def _run_login(
                 )
                 _run_cdp_login(timeout, chrome_path=chrome_path, browser=browser)
                 return
-            console.print(f"\n[red]Browser import failed:[/red] {exc}", highlight=False)
-            raise
+            else:
+                console.print(f"\n[red]Browser import failed:[/red] {exc}", highlight=False)
+                raise
 
     if method in ("auto", "profile"):
         console.print("[dim]Trying silent refresh from saved Chrome profile…[/dim]")
@@ -549,6 +550,28 @@ def _run_login(
         save_tokens(tokens)
         _show_login_success(tokens)
         return
+
+    from .auth import BROWSER_META, _find_cdp_port, _normalize_browser_name
+
+    if method == "auto" and _find_cdp_port():
+        browser_slug = _normalize_browser_name(browser) if browser else "helium"
+        label = BROWSER_META[browser_slug]["label"]
+        console.print(
+            Panel(
+                f"[yellow]CDP is active on {label}, but you are not signed in to Google.[/yellow]\n\n"
+                "1. In that same browser window, open "
+                "[bold]https://notebooklm.google.com[/bold]\n"
+                "2. Sign in with your Google account\n"
+                f"3. Run [bold]notebooklm-mcp-2026 login --browser {browser_slug}[/bold] again\n\n"
+                "[dim]Do not use the normal browser shortcut — keep using "
+                f"{label} (MCP debug).cmd[/dim]",
+                title="[yellow]Login required[/yellow]",
+                border_style="yellow",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        raise RuntimeError("Not signed in to Google in the CDP browser.")
 
     # CDP interactive login (original flow, last resort)
     _run_cdp_login(timeout, chrome_path=chrome_path, browser=browser)

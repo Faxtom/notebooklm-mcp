@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-06-18
+
+### Fixed
+- `login --browser helium` no longer aborts after browser import when `--method` is `auto` (regression caused immediate failure instead of continuing)
+- CDP cookie import: enable Network domain, navigate to NotebookLM, broader Google domain matching
+- Clear message when CDP is active but Google session cookies are missing (sign in first)
+
 ## [0.3.5] - 2026-06-18
 
 ### Fixed

@@ -251,9 +251,10 @@ class TestHeliumSupport:
         assert cookies == sample_cookies
         mock_cdp.assert_called_once()
 
+    @patch("notebooklm_mcp_2026.auth._find_cdp_port", return_value=None)
     @patch("notebooklm_mcp_2026.auth._try_load_cookies_via_running_cdp", return_value=None)
     @patch("notebooklm_mcp_2026.auth.helium_cookie_db_paths")
-    def test_load_helium_cookies_locked_hint(self, mock_paths, _mock_cdp):
+    def test_load_helium_cookies_locked_hint(self, mock_paths, _mock_cdp, _mock_port):
         mock_paths.return_value = (Path("/fake/Cookies"), Path("/fake/Local State"))
 
         class FakeAdminError(Exception):
